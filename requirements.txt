@@ -1,4 +1,5 @@
 numpy==1.18.1
 torch==1.4.0
-gym[atari]
+gym[atari]==0.15.6
 tensorboard==2.1.0
+hydra-core==0.11.3
