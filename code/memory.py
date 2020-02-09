@@ -157,8 +157,7 @@ class DummyMultiStepMemory(DummyMemory):
         if self.multi_step != 1:
             self.buff = MultiStepBuff(maxlen=self.multi_step)
 
-    def append(self, state, action, reward, next_state, done,
-               episode_done=False):
+    def append(self, state, action, reward, next_state, done):
         if self.multi_step != 1:
             self.buff.append(state, action, reward)
 
@@ -166,74 +165,7 @@ class DummyMultiStepMemory(DummyMemory):
                 state, action, reward = self.buff.get(self.gamma)
                 self._append(state, action, reward, next_state, done)
 
-            if episode_done or done:
+            if done:
                 self.buff.reset()
         else:
             self._append(state, action, reward, next_state, done)
-
-
-class DummyPrioritizedMemory(DummyMultiStepMemory):
-    state_keys = ['state', 'next_state']
-    np_keys = ['action', 'reward', 'done', 'priority']
-    keys = state_keys + np_keys
-
-    def __init__(self, capacity, state_shape, action_shape, device, gamma=0.99,
-                 multi_step=3, alpha=0.6, beta=0.4, beta_annealing=0.001,
-                 epsilon=1e-4):
-        super(DummyPrioritizedMemory, self).__init__(
-            capacity, state_shape, action_shape, device, gamma, multi_step)
-        self.alpha = alpha
-        self.beta = beta
-        self.beta_annealing = beta_annealing
-        self.epsilon = epsilon
-
-    def reset(self):
-        super(DummyPrioritizedMemory, self).reset()
-        self['priority'] = np.empty((self.capacity, 1), dtype=np.float32)
-
-    def append(self, state, action, reward, next_state, done, error,
-               episode_done=False):
-        if self.multi_step != 1:
-            self.buff.append(state, action, reward)
-
-            if len(self.buff) == self.multi_step:
-                state, action, reward = self.buff.get(self.gamma)
-                self['priority'][self._p] = self.calc_priority(error)
-                self._append(state, action, reward, next_state, done)
-
-            if episode_done or done:
-                self.buff.reset()
-        else:
-            self['priority'][self._p] = self.calc_priority(error)
-            self._append(
-                state, action, reward, next_state, done)
-
-    def update_priority(self, indices, errors):
-        self['priority'][indices] = np.reshape(
-            self.calc_priority(errors), (-1, 1))
-
-    def calc_priority(self, error):
-        return (np.abs(error) + self.epsilon) ** self.alpha
-
-    def get(self):
-        state_dict = {key: self[key] for key in self.state_keys}
-        np_dict = {key: self[key][:self._n] for key in self.np_keys}
-        state_dict.update(**np_dict)
-        return state_dict
-
-    def sample(self, batch_size):
-        self.beta = min(1. - self.epsilon, self.beta + self.beta_annealing)
-        sampler = WeightedRandomSampler(
-            self['priority'][:self._n, 0], batch_size)
-        indices = list(sampler)
-
-        batch = self._sample(indices, batch_size)
-        priorities = np.array(self['priority'][indices], dtype=np.float32)
-        priorities = priorities / np.sum(self['priority'][:self._n])
-
-        weights = (self._n * priorities) ** -self.beta
-        weights /= np.max(weights)
-        weights = torch.FloatTensor(
-            weights).view(batch_size, -1).to(self.device)
-
-        return batch, indices, weights
