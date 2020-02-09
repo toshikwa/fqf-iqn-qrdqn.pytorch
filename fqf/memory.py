@@ -1,7 +1,6 @@
 from collections import deque
 import numpy as np
 import torch
-from torch.utils.data.sampler import WeightedRandomSampler
 
 
 class MultiStepBuff:
@@ -51,11 +50,10 @@ class DummyMemory(dict):
     np_keys = ['action', 'reward', 'done']
     keys = state_keys + np_keys
 
-    def __init__(self, capacity, state_shape, action_shape, device):
+    def __init__(self, capacity, state_shape, device):
         super(DummyMemory, self).__init__()
         self.capacity = int(capacity)
         self.state_shape = state_shape
-        self.action_shape = action_shape
         self.device = device
         self.reset()
 
@@ -63,8 +61,7 @@ class DummyMemory(dict):
         for key in self.state_keys:
             self[key] = []
 
-        self['action'] = np.empty(
-            (self.capacity, *self.action_shape), dtype=np.float32)
+        self['action'] = np.empty((self.capacity, 1), dtype=np.int64)
         self['reward'] = np.empty((self.capacity, 1), dtype=np.float32)
         self['done'] = np.empty((self.capacity, 1), dtype=np.float32)
 
@@ -112,7 +109,7 @@ class DummyMemory(dict):
         states = torch.ByteTensor(states).to(self.device).float() / 255.
         next_states = torch.ByteTensor(
             next_states).to(self.device).float() / 255.
-        actions = torch.FloatTensor(self['action'][indices]).to(self.device)
+        actions = torch.LongTensor(self['action'][indices]).to(self.device)
         rewards = torch.FloatTensor(self['reward'][indices]).to(self.device)
         dones = torch.FloatTensor(self['done'][indices]).to(self.device)
 
@@ -147,10 +144,10 @@ class DummyMemory(dict):
 
 class DummyMultiStepMemory(DummyMemory):
 
-    def __init__(self, capacity, state_shape, action_shape, device,
-                 gamma=0.99, multi_step=3):
+    def __init__(self, capacity, state_shape, device, gamma=0.99,
+                 multi_step=3):
         super(DummyMultiStepMemory, self).__init__(
-            capacity, state_shape, action_shape, device)
+            capacity, state_shape, device)
 
         self.gamma = gamma
         self.multi_step = int(multi_step)
