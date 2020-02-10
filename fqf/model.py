@@ -9,7 +9,7 @@ def grad_false(network):
         param.requires_grad = False
 
 
-class FQF():
+class FQF:
 
     def __init__(self, num_channels, num_actions, num_taus=32, num_cosines=64,
                  embedding_dim=7*7*64, device=torch.device('cpu')):
@@ -39,50 +39,69 @@ class FQF():
         self.num_cosines = num_cosines
         self.embedding_dim = embedding_dim
 
-    def calculate_q(self, states):
-        num_batches = states.shape[0]
-
-        # Calculate state embeddings.
-        state_embeddings = self.dqn_base(states)
-        assert state_embeddings.shape == (num_batches, self.embedding_dim)
-
-        # Calculate proposals of fractions.
-        taus, hat_taus = self.fraction_net(state_embeddings)
-        assert taus.shape == (num_batches, self.num_taus+1)
-        assert hat_taus.shape == (num_batches, self.num_taus)
+    def calculate_q(self, state_embeddings, taus, hat_taus):
+        batch_size = state_embeddings.shape[0]
 
         # Calculate quantiles of proposed fractions.
         quantiles = self.quantile_net(state_embeddings, hat_taus)
         assert quantiles.shape == (
-            num_batches, self.num_taus, self.num_actions)
+            batch_size, self.num_taus, self.num_actions)
 
         # Calculate expectations of fractions
         q = ((taus[:, 1:, None] - taus[:, :-1, None]) * quantiles).sum(dim=1)
-        assert q.shape == (num_batches, self.num_actions)
+        assert q.shape == (batch_size, self.num_actions)
 
         return q
 
-    def calculate_gradients_of_tau(self, state_embeddings, taus, hat_taus):
-        num_batches = state_embeddings.shape[0]
+    def calculate_gradients_of_tau_s(self, state_embeddings, taus, hat_taus):
+        batch_size = state_embeddings.shape[0]
 
         with torch.no_grad():
             quantile_tau_i = self.quantile_net(
                 state_embeddings, taus[:, 1:-1])
             assert quantile_tau_i.shape == (
-                num_batches, self.num_taus-1, self.num_actions)
+                batch_size, self.num_taus-1, self.num_actions)
 
             quantile_hat_tau_i = self.quantile_net(
                 state_embeddings, hat_taus[:, 1:])
             assert quantile_hat_tau_i.shape == (
-                num_batches, self.num_taus-1, self.num_actions)
+                batch_size, self.num_taus-1, self.num_actions)
 
-            quantile_hat_tau_i_1 = self.quantile_net(
+            quantile_hat_tau_i_minus_1 = self.quantile_net(
                 state_embeddings, hat_taus[:, :-1])
-            assert quantile_hat_tau_i_1.shape == (
-                num_batches, self.num_taus-1, self.num_actions)
+            assert quantile_hat_tau_i_minus_1.shape == (
+                batch_size, self.num_taus-1, self.num_actions)
 
         gradients =\
-            2 * quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_1
+            2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
+
+        return gradients
+
+    def calculate_gradients_of_tau_sa(self, state_embeddings, taus, hat_taus,
+                                      action_index):
+        batch_size = state_embeddings.shape[0]
+
+        with torch.no_grad():
+            quantile_tau_i = self.quantile_net(
+                state_embeddings, taus[:, 1:-1]).gather(
+                dim=2, index=action_index)
+            assert quantile_tau_i.shape == (
+                batch_size, self.num_taus-1, 1)
+
+            quantile_hat_tau_i = self.quantile_net(
+                state_embeddings, hat_taus[:, 1:]).gather(
+                dim=2, index=action_index)
+            assert quantile_hat_tau_i.shape == (
+                batch_size, self.num_taus-1, 1)
+
+            quantile_hat_tau_i_minus_1 = self.quantile_net(
+                state_embeddings, hat_taus[:, :-1]).gather(
+                dim=2, index=action_index)
+            assert quantile_hat_tau_i_minus_1.shape == (
+                batch_size, self.num_taus-1, 1)
+
+        gradients =\
+            2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
 
         return gradients
 

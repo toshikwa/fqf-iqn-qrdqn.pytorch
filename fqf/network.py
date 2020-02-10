@@ -34,10 +34,10 @@ class DQNBase(nn.Module):
         ).apply(weights_init_xavier)
 
     def forward(self, states):
-        num_batches = states.shape[0]
+        batch_size = states.shape[0]
         state_embedding = self.net(states)
 
-        assert state_embedding.shape == (num_batches, self.embedding_dim)
+        assert state_embedding.shape == (batch_size, self.embedding_dim)
         return state_embedding
 
 
@@ -46,7 +46,7 @@ class FractionProposalNetwork(nn.Module):
     def __init__(self, num_taus=32, embedding_dim=7*7*64):
         super(FractionProposalNetwork, self).__init__()
 
-        self.num_taus = 32
+        self.num_taus = num_taus
         self.embedding_dim = embedding_dim
 
         self.net = nn.Sequential(
@@ -54,26 +54,34 @@ class FractionProposalNetwork(nn.Module):
         )
 
     def forward(self, state_embeddings):
-        num_batches = state_embeddings.shape[0]
 
-        # (num_batches, 1)
+        batch_size = state_embeddings.shape[0]
+
+        # (batch_size, num_taus)
+        log_probs = F.log_softmax(self.net(state_embeddings), dim=1)
+        probs = log_probs.exp()
+
+        # (batch_size, 1)
         tau_0 = torch.zeros(
-            (num_batches, 1), dtype=state_embeddings.dtype,
+            (batch_size, 1), dtype=state_embeddings.dtype,
             device=state_embeddings.device)
 
-        # (num_batches, num_taus)
-        taus_1_N = torch.cumsum(
-            F.log_softmax(self.net(state_embeddings), dim=1).exp(), dim=1)
+        # (batch_size, num_taus)
+        taus_1_N = torch.cumsum(probs, dim=1)
 
-        # (num_batches, num_taus+1)
+        # (batch_size, num_taus+1)
         taus = torch.cat((tau_0, taus_1_N), dim=1)
+        assert taus.shape == (batch_size, self.num_taus+1)
 
-        # (num_batches, num_taus)
+        # (batch_size, num_taus)
         hat_taus = (taus[:, :-1] + taus[:, 1:]) / 2.
+        assert hat_taus.shape == (batch_size, self.num_taus)
 
-        assert taus.shape == (num_batches, self.num_taus+1)
-        assert hat_taus.shape == (num_batches, self.num_taus)
-        return taus, hat_taus
+        # (batch_size, 1)
+        entropies = -(log_probs * probs).sum(dim=-1, keepdim=True)
+        assert entropies.shape == (batch_size, 1)
+
+        return taus, hat_taus, entropies
 
 
 class QuantileValueNetwork(nn.Module):
@@ -90,6 +98,8 @@ class QuantileValueNetwork(nn.Module):
             nn.ReLU()
         )
         self.output_net = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.ReLU(),
             nn.Linear(embedding_dim, num_actions),
         )
 
@@ -97,28 +107,28 @@ class QuantileValueNetwork(nn.Module):
         assert state_embeddings.shape[1] == self.embedding_dim
         assert state_embeddings.shape[0] == taus.shape[0]
 
-        num_batches = taus.shape[0]
+        batch_size = taus.shape[0]
         num_taus = taus.shape[1]
 
-        # (num_batches, 1, embedding_dim)
+        # (batch_size, 1, embedding_dim)
         state_embeddings = state_embeddings.view(
-            num_batches, 1, self.embedding_dim)
+            batch_size, 1, self.embedding_dim)
 
-        # (num_batches, num_taus, embedding_dim)
+        # (batch_size, num_taus, embedding_dim)
         cos_embeddings = self.embed_taus(taus)
 
-        # (num_batches * num_taus, embedding_dim)
+        # (batch_size * num_taus, embedding_dim)
         embeddings = (state_embeddings * cos_embeddings).view(
-            num_batches * num_taus, self.embedding_dim)
+            batch_size * num_taus, self.embedding_dim)
 
-        # (num_batches, num_taus, num_actions)
+        # (batch_size, num_taus, num_actions)
         quantile_values = self.output_net(embeddings).view(
-            num_batches, num_taus, self.num_actions)
+            batch_size, num_taus, self.num_actions)
 
         return quantile_values
 
     def embed_taus(self, taus):
-        num_batches = taus.shape[0]
+        batch_size = taus.shape[0]
         num_taus = taus.shape[1]
 
         # (1, 1, num_cosines)
@@ -126,13 +136,13 @@ class QuantileValueNetwork(nn.Module):
             start=1, end=self.num_cosines+1, dtype=taus.dtype,
             device=taus.device).view(1, 1, self.num_cosines)
 
-        # (num_batches * num_taus, num_cosines)
+        # (batch_size * num_taus, num_cosines)
         cosines = torch.cos(
-            taus.view(num_batches, num_taus, 1) * i_pi
-            ).view(num_batches * num_taus, self.num_cosines)
+            taus.view(batch_size, num_taus, 1) * i_pi
+            ).view(batch_size * num_taus, self.num_cosines)
 
-        # (num_batches, num_taus, embedding_dim)
+        # (batch_size, num_taus, embedding_dim)
         cos_embeddings = self.embeding_net(cosines).view(
-            num_batches, num_taus, self.embedding_dim)
+            batch_size, num_taus, self.embedding_dim)
 
         return cos_embeddings
