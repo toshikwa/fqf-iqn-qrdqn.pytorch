@@ -175,7 +175,7 @@ class FQFAgent:
             next_states, dones)
 
         update_params(self.fraction_optim, fraction_loss + entropy_loss, True)
-        update_params(self.quantile_optim, quantile_loss)
+        update_params(self.quantile_optim, quantile_loss + entropy_loss)
 
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
