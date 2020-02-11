@@ -162,17 +162,21 @@ class FQFAgent:
         states, actions, rewards, next_states, dones =\
             self.memory.sample(self.batch_size)
 
+        # Calculate features of states.
         state_embeddings = self.fqf.dqn_base(states)
+        # Calculate fractions and entropies.
         taus, hat_taus, entropies = self.fqf.fraction_net(state_embeddings)
 
         fraction_loss = self.calculate_fraction_loss(
             state_embeddings, taus, hat_taus, actions)
 
-        entropy_loss = -self.ent_coef * entropies.mean()
-
         quantile_loss = self.calculate_quantile_loss(
             state_embeddings, taus, hat_taus, actions, rewards,
             next_states, dones)
+
+        # We use entropy loss as a regularizer to prevent the distribution
+        # from degenerating into a deterministic one.
+        entropy_loss = -self.ent_coef * entropies.mean()
 
         update_params(self.fraction_optim, fraction_loss + entropy_loss, True)
         update_params(self.quantile_optim, quantile_loss + entropy_loss)
