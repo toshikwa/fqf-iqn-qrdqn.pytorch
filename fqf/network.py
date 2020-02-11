@@ -119,7 +119,7 @@ class QuantileValueNetwork(nn.Module):
         # Calculate embeddings of taus.
         tau_embeddings = self.calculate_embedding_of_taus(taus)
         assert tau_embeddings.shape == (
-            batch_size, self.num_taus, self.embedding_dim)
+            batch_size, num_taus, self.embedding_dim)
 
         # Calculate embeddings of states and taus.
         embeddings = (state_embeddings * tau_embeddings).view(
