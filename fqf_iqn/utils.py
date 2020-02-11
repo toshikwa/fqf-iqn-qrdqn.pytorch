@@ -21,19 +21,20 @@ def calculate_huber_loss(td_errors, kappa=1.0):
         kappa * (td_errors.abs() - 0.5 * kappa))
 
 
-def calculate_quantile_huber_loss(td_errors, hat_taus, kappa=1.0):
-    batch_size, num_taus, num_taus = td_errors.shape
+def calculate_quantile_huber_loss(td_errors, taus, kappa=1.0):
+    batch_size, num_taus, num_target_taus = td_errors.shape
 
     # Calculate huber loss element-wisely.
     element_wise_huber_loss = calculate_huber_loss(td_errors, kappa)
-    assert element_wise_huber_loss.shape == (batch_size, num_taus, num_taus)
+    assert element_wise_huber_loss.shape == (
+        batch_size, num_taus, num_target_taus)
 
     # Calculate quantile huber loss element-wisely.
     element_wise_quantile_huber_loss = torch.abs(
-        hat_taus[..., None] - (td_errors < 0).float()
+        taus[..., None] - (td_errors < 0).float()
         ) * element_wise_huber_loss / kappa
     assert element_wise_quantile_huber_loss.shape == (
-        batch_size, num_taus, num_taus)
+        batch_size, num_taus, num_target_taus)
 
     return element_wise_quantile_huber_loss.sum(dim=-1).mean()
 

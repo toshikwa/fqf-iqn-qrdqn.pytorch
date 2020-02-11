@@ -140,7 +140,7 @@ class FQFAgent(BaseAgent):
 
         # Calculate quantile values of current states and current actions.
         current_sa_quantiles = current_s_quantiles.gather(
-            dim=2, index=action_index).view(self.batch_size, 1, self.num_taus)
+            dim=2, index=action_index).view(self.batch_size, self.num_taus, 1)
 
         with torch.no_grad():
             # Calculate features of next states.
@@ -152,7 +152,7 @@ class FQFAgent(BaseAgent):
 
             # Calculate quantile values of next states and all actions.
             next_s_quantiles = self.fqf.target_net(
-                next_state_embeddings, hat_taus)
+                next_state_embeddings, next_hat_taus)
 
             # Calculate next greedy actions.
             next_actions = torch.argmax(self.fqf.calculate_q(
@@ -166,13 +166,13 @@ class FQFAgent(BaseAgent):
 
             # Calculate quantile values of next states and next actions.
             next_sa_quantiles = next_s_quantiles.gather(
-                dim=2, index=next_action_index).view(-1, self.num_taus, 1)
+                dim=2, index=next_action_index).view(-1, 1, self.num_taus)
 
             # Calculate target quantile values.
             target_sa_quantiles = rewards[..., None] + (
                 1.0 - dones[..., None]) * self.gamma_n * next_sa_quantiles
             assert target_sa_quantiles.shape == (
-                self.batch_size, self.num_taus, 1)
+                self.batch_size, 1, self.num_taus)
 
         # TD errors.
         td_errors = target_sa_quantiles - current_sa_quantiles

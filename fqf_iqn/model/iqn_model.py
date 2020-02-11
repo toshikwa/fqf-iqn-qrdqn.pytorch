@@ -1,22 +1,19 @@
 import os
 import torch
 
-from fqf_iqn.network import DQNBase, FractionProposalNetwork,\
-    QuantileValueNetwork
+from fqf_iqn.network import DQNBase, QuantileValueNetwork
 from fqf_iqn.utils import grad_false
 
 
-class FQF:
+class IQN:
 
-    def __init__(self, num_channels, num_actions, num_taus=32, num_cosines=64,
-                 embedding_dim=7*7*64, device=torch.device('cpu')):
+    def __init__(self, num_channels, num_actions, N=64, N_dash=64, K=32,
+                 num_cosines=64, embedding_dim=7*7*64,
+                 device=torch.device('cpu')):
 
         # Feature extractor.
         self.dqn_base = DQNBase(
             num_channels=num_channels, embedding_dim=embedding_dim).to(device)
-        # Fraction Proposal Network.
-        self.fraction_net = FractionProposalNetwork(
-            num_taus=num_taus, embedding_dim=embedding_dim).to(device)
         # Quantile Value Network.
         self.quantile_net = QuantileValueNetwork(
             num_actions=num_actions, num_cosines=num_cosines,
@@ -32,75 +29,29 @@ class FQF:
         grad_false(self.target_net)
 
         self.num_actions = num_actions
-        self.num_taus = num_taus
+        self.N = N
+        self.N_dash = N_dash
+        self.K = K
         self.num_cosines = num_cosines
         self.embedding_dim = embedding_dim
 
-    def calculate_q(self, state_embeddings, taus, hat_taus):
+    def calculate_q(self, state_embeddings):
         batch_size = state_embeddings.shape[0]
 
-        # Calculate quantiles of proposed fractions.
-        quantiles = self.quantile_net(state_embeddings, hat_taus)
-        assert quantiles.shape == (
-            batch_size, self.num_taus, self.num_actions)
+        # Calculate random fractions.
+        taus = torch.rand(
+            batch_size, self.K, dtype=state_embeddings.dtype,
+            device=state_embeddings.device)
+
+        # Calculate quantiles of random fractions.
+        quantiles = self.quantile_net(state_embeddings, taus)
+        assert quantiles.shape == (batch_size, self.K, self.num_actions)
 
         # Calculate expectations of values.
-        q = ((taus[:, 1:, None] - taus[:, :-1, None]) * quantiles).sum(dim=1)
+        q = quantiles.mean(dim=1)
         assert q.shape == (batch_size, self.num_actions)
 
         return q
-
-    def calculate_gradients_of_tau_s(self, state_embeddings, taus, hat_taus):
-        batch_size = state_embeddings.shape[0]
-
-        with torch.no_grad():
-            quantile_tau_i = self.quantile_net(
-                state_embeddings, taus[:, 1:-1])
-            assert quantile_tau_i.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
-
-            quantile_hat_tau_i = self.quantile_net(
-                state_embeddings, hat_taus[:, 1:])
-            assert quantile_hat_tau_i.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
-
-            quantile_hat_tau_i_minus_1 = self.quantile_net(
-                state_embeddings, hat_taus[:, :-1])
-            assert quantile_hat_tau_i_minus_1.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
-
-        gradients =\
-            2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
-
-        return gradients
-
-    def calculate_gradients_of_tau_sa(self, state_embeddings, taus, hat_taus,
-                                      action_index):
-        batch_size = state_embeddings.shape[0]
-
-        with torch.no_grad():
-            quantile_tau_i = self.quantile_net(
-                state_embeddings, taus[:, 1:-1]).gather(
-                dim=2, index=action_index)
-            assert quantile_tau_i.shape == (
-                batch_size, self.num_taus-1, 1)
-
-            quantile_hat_tau_i = self.quantile_net(
-                state_embeddings, hat_taus[:, 1:]).gather(
-                dim=2, index=action_index)
-            assert quantile_hat_tau_i.shape == (
-                batch_size, self.num_taus-1, 1)
-
-            quantile_hat_tau_i_minus_1 = self.quantile_net(
-                state_embeddings, hat_taus[:, :-1]).gather(
-                dim=2, index=action_index)
-            assert quantile_hat_tau_i_minus_1.shape == (
-                batch_size, self.num_taus-1, 1)
-
-        gradients =\
-            2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
-
-        return gradients
 
     def update_target(self):
         self.target_net.load_state_dict(
@@ -111,9 +62,6 @@ class FQF:
             self.dqn_base.state_dict(),
             os.path.join(save_dir, 'dqn_base.pth'))
         torch.save(
-            self.fraction_net.state_dict(),
-            os.path.join(save_dir, 'fraction_net.pth'))
-        torch.save(
             self.quantile_net.state_dict(),
             os.path.join(save_dir, 'quantile_net.pth'))
         torch.save(
@@ -123,8 +71,6 @@ class FQF:
     def load(self, save_dir):
         self.dqn_base.load_state_dict(torch.load(
             os.path.join(save_dir, 'dqn_base.pth')))
-        self.fraction_net.load_state_dict(torch.load(
-            os.path.join(save_dir, 'fraction_net.pth')))
         self.quantile_net.load_state_dict(torch.load(
             os.path.join(save_dir, 'quantile_net.pth')))
         self.target_net.load_state_dict(torch.load(
