@@ -56,22 +56,30 @@ class IQNAgent(BaseAgent):
 
         states, actions, rewards, next_states, dones =\
             self.memory.sample(self.batch_size)
+
+        # Calculate features of states.
+        state_embeddings = self.iqn.dqn_base(states)
+
         loss = self.calculate_loss(
-            states, actions, rewards, next_states, dones)
+            state_embeddings, actions, rewards, next_states, dones)
+
         update_params(self.optim, loss)
 
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
                 'loss/loss', loss.detach().item(), self.learning_steps)
+            with torch.no_grad():
+                mean_q = self.iqn.calculate_q(state_embeddings).mean()
+            self.writer.add_scalar(
+                'stats/mean_Q', mean_q, self.learning_steps)
 
-    def calculate_loss(self, states, actions, rewards, next_states, dones):
-
-        # Calculate features of states.
-        state_embeddings = self.iqn.dqn_base(states)
+    def calculate_loss(self, state_embeddings, actions, rewards, next_states,
+                       dones):
 
         # Sample fractions.
         taus = torch.rand(
-            self.batch_size, self.N, dtype=states.dtype, device=states.device)
+            self.batch_size, self.N, dtype=state_embeddings.dtype,
+            device=state_embeddings.device)
 
         # Calculate quantile values of current states and all actions.
         current_s_quantiles = self.iqn.quantile_net(state_embeddings, taus)
@@ -90,8 +98,8 @@ class IQNAgent(BaseAgent):
 
             # Sample next fractions.
             tau_dashes = torch.rand(
-                self.batch_size, self.N_dash, dtype=states.dtype,
-                device=states.device)
+                self.batch_size, self.N_dash, dtype=state_embeddings.dtype,
+                device=state_embeddings.device)
 
             # Calculate quantile values of next states and all actions.
             next_s_quantiles = self.iqn.target_net(

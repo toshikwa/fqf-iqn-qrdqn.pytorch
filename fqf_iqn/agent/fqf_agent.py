@@ -97,9 +97,8 @@ class FQFAgent(BaseAgent):
                 self.learning_steps)
 
             with torch.no_grad():
-                curr_q = self.fqf.calculate_q(
-                    state_embeddings, taus, hat_taus)
-                mean_q = curr_q.mean(dim=0).sum()
+                mean_q = self.fqf.calculate_q(
+                    state_embeddings, taus, hat_taus).mean()
 
             self.writer.add_scalar(
                 'stats/mean_Q', mean_q, self.learning_steps)
