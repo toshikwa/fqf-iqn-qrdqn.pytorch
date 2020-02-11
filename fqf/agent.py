@@ -33,7 +33,7 @@ class FQFAgent:
         self.device = torch.device(
             "cuda" if cuda and torch.cuda.is_available() else "cpu")
 
-        # DQN-like feature extractor.
+        # Fully parametrized Quantile Function.
         self.fqf = FQF(
             num_channels=self.env.observation_space.shape[0],
             num_actions=self.env.action_space.n, num_taus=num_taus,
@@ -92,6 +92,13 @@ class FQFAgent:
         return self.steps % self.update_period == 0\
             and self.steps >= self.start_steps
 
+    def is_greedy(self, eval=False):
+        if eval:
+            return np.random.rand() < self.epsilon_eval
+        else:
+            return self.steps < self.start_steps\
+                or np.random.rand() < self.epsilon_train
+
     def explore(self):
         # Act with randomness.
         action = self.env.action_space.sample()
@@ -101,6 +108,7 @@ class FQFAgent:
         # Act without randomness.
         state = torch.ByteTensor(
             state).unsqueeze(0).to(self.device).float() / 255.
+
         with torch.no_grad():
             # Calculate state embeddings.
             state_embedding = self.fqf.dqn_base(state)
@@ -109,6 +117,7 @@ class FQFAgent:
             # Calculate Q and get greedy action.
             action = self.fqf.calculate_q(
                 state_embedding, tau, hat_tau).argmax().item()
+
         return action
 
     def train_episode(self):
@@ -119,8 +128,7 @@ class FQFAgent:
         state = self.env.reset()
 
         while not done:
-            if self.steps < self.start_steps or\
-                    np.random.rand() < self.epsilon_train:
+            if self.is_greedy(eval=False):
                 action = self.explore()
             else:
                 action = self.exploit(state)
@@ -226,58 +234,61 @@ class FQFAgent:
     def calculate_quantile_loss(self, state_embeddings, taus, hat_taus,
                                 actions, rewards, next_states, dones):
 
-        # (batch_size, num_taus, num_actions)
+        # Calculate quantile values of current states and all actions.
         current_s_quantiles = self.fqf.quantile_net(
             state_embeddings, hat_taus)
 
+        # Repeat current actions into (batch_size, num_taus, 1).
         action_index = actions[..., None].expand(
             self.batch_size, self.num_taus, 1)
 
-        # (batch_size, 1, num_taus)
+        # Calculate quantile values of current states and current actions.
         current_sa_quantiles = current_s_quantiles.gather(
             dim=2, index=action_index).view(self.batch_size, 1, self.num_taus)
 
         with torch.no_grad():
-            # (batch_size, embedding_dim)
+            # Calculate features of next states.
             next_state_embeddings = self.fqf.dqn_base(next_states)
 
+            # Calculate fractions correspond to next states.
             next_taus, next_hat_taus, _ =\
                 self.fqf.fraction_net(next_state_embeddings)
 
-            # (batch_size, num_taus, num_actions)
+            # Calculate quantile values of next states and all actions.
             next_s_quantiles = self.fqf.target_net(
                 next_state_embeddings, hat_taus)
 
-            # (batch_size, 1, 1)
+            # Calculate next greedy actions.
             next_actions = torch.argmax(self.fqf.calculate_q(
                 next_state_embeddings, next_taus, next_hat_taus), dim=1
                 ).view(-1, 1, 1)
             assert next_actions.shape == (self.batch_size, 1, 1)
 
-            # (batch_size, num_taus, 1)
+            # Repeat next actions into (batch_size, num_taus, 1).
             next_action_index = next_actions.expand(
                 self.batch_size, self.num_taus, 1)
 
-            # (batch_size, num_taus, 1)
+            # Calculate quantile values of next states and next actions.
             next_sa_quantiles = next_s_quantiles.gather(
                 dim=2, index=next_action_index).view(-1, self.num_taus, 1)
 
-            # (batch_size, num_taus, 1)
+            # Calculate target quantile values.
             target_sa_quantiles = rewards[..., None] + (
                 1.0 - dones[..., None]) * self.gamma_n * next_sa_quantiles
             assert target_sa_quantiles.shape == (
                 self.batch_size, self.num_taus, 1)
 
-        # (batch_size, num_taus, num_taus)
+        # TD errors.
         td_errors = target_sa_quantiles - current_sa_quantiles
         assert td_errors.shape == (
             self.batch_size, self.num_taus, self.num_taus)
 
-        # (batch_size, num_taus, num_taus)
+        # Calculate huber loss element-wisely.
         huber_loss = calculate_huber_loss(td_errors, self.kappa)
         assert huber_loss.shape == (
             self.batch_size, self.num_taus, self.num_taus)
 
+        # Calculate quantile huber loss.
         quantile_huber_loss = (torch.abs(
             hat_taus[..., None]-(td_errors < 0).float()
             ) * huber_loss / self.kappa).sum(dim=-1).mean()
@@ -293,7 +304,7 @@ class FQFAgent:
             episode_reward = 0.
             done = False
             while not done:
-                if np.random.rand() < self.epsilon_eval:
+                if self.is_greedy(eval=True):
                     action = self.explore()
                 else:
                     action = self.exploit(state)

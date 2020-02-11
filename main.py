@@ -11,14 +11,17 @@ def run(args):
     with open(os.path.join('config', 'fqf.yaml')) as f:
         config = yaml.load(f, Loader=yaml.SafeLoader)
 
+    # Create environments.
     env = make_pytorch_env(args.env_id)
     test_env = make_pytorch_env(
         args.env_id, episode_life=False, clip_rewards=False)
 
+    # Specify the directory to log.
     time = datetime.now().strftime("%Y%m%d-%H%M")
     log_dir = os.path.join(
         'logs', args.env_id, f'FQF-{time}')
 
+    # Create the agent and run.
     agent = FQFAgent(
         env=env, test_env=test_env, log_dir=log_dir, seed=args.seed,
         cuda=args.cuda, **config)

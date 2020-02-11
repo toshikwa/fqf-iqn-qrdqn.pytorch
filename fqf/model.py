@@ -47,7 +47,7 @@ class FQF:
         assert quantiles.shape == (
             batch_size, self.num_taus, self.num_actions)
 
-        # Calculate expectations of fractions.
+        # Calculate expectations of values.
         q = ((taus[:, 1:, None] - taus[:, :-1, None]) * quantiles).sum(dim=1)
         assert q.shape == (batch_size, self.num_actions)
 
