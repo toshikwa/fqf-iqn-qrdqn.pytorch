@@ -107,7 +107,7 @@ class QuantileValueNetwork(nn.Module):
         assert state_embeddings.shape[1] == self.embedding_dim
         assert state_embeddings.shape[0] == taus.shape[0]
 
-        # NOTE: Because Variable taus correspond to either \tau or \hat \tau
+        # NOTE: Because variable taus correspond to either \tau or \hat \tau
         # in the paper, num_taus isn't neccesarily the same as fqf.num_taus.
         batch_size = taus.shape[0]
         num_taus = taus.shape[1]
