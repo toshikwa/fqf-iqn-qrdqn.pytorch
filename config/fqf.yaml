@@ -1,4 +1,4 @@
-num_steps: 2000000
+num_steps: 500000
 batch_size: 32
 num_taus: 32
 num_cosines: 64
@@ -9,10 +9,11 @@ quantile_lr: 5.e-5
 memory_size: 1000000
 gamma: 0.99
 multi_step: 1
-update_period: 4
-target_update_period: 10000
+update_interval: 4
+target_update_interval: 10000
 start_steps: 50000
 epsilon_train: 0.01
 epsilon_eval: 0.001
 log_interval: 50
 eval_interval: 10000
+num_eval_steps: 125000  # It's ignored in the current code.

@@ -11,13 +11,13 @@ from .utils import update_params, calculate_huber_loss, RunningMeanStats
 
 class FQFAgent:
 
-    def __init__(self, env, test_env, log_dir, num_steps=2*(10**8),
+    def __init__(self, env, test_env, log_dir, num_steps=5*(10**7),
                  batch_size=32, num_taus=32, num_cosines=64, ent_coef=1.0,
                  kappa=1.0, fraction_lr=2.5e-9, quantile_lr=5e-5,
                  memory_size=10**6, gamma=0.99, multi_step=1,
-                 update_period=4, target_update_period=10000,
+                 update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
-                 log_interval=50, eval_interval=1000,
+                 log_interval=50, eval_interval=250000, num_eval_steps=125000,
                  cuda=True, seed=0):
 
         self.env = env
@@ -26,7 +26,7 @@ class FQFAgent:
         torch.manual_seed(seed)
         np.random.seed(seed)
         self.env.seed(seed)
-        self.test_env.seed(seed)
+        self.test_env.seed(2**31-1-seed)
         # torch.backends.cudnn.deterministic = True  # It harms a performance.
         # torch.backends.cudnn.benchmark = False  # It harms a performance.
 
@@ -73,14 +73,15 @@ class FQFAgent:
         self.num_cosines = num_cosines
         self.ent_coef = ent_coef
         self.kappa = kappa
-        self.update_period = update_period
-        self.target_update_period = target_update_period
+        self.update_interval = update_interval
+        self.target_update_interval = target_update_interval
         self.gamma_n = gamma ** multi_step
         self.start_steps = start_steps
         self.epsilon_train = epsilon_train
         self.epsilon_eval = epsilon_eval
         self.log_interval = log_interval
         self.eval_interval = eval_interval
+        self.num_eval_steps = num_eval_steps
 
     def run(self):
         while True:
@@ -89,7 +90,7 @@ class FQFAgent:
                 break
 
     def is_update(self):
-        return self.steps % self.update_period == 0\
+        return self.steps % self.update_interval == 0\
             and self.steps >= self.start_steps
 
     def is_greedy(self, eval=False):
@@ -164,7 +165,7 @@ class FQFAgent:
     def learn(self):
         self.learning_steps += 1
 
-        if self.learning_steps % self.target_update_period == 0:
+        if self.steps % self.target_update_interval == 0:
             self.fqf.update_target()
 
         states, actions, rewards, next_states, dones =\
@@ -296,7 +297,9 @@ class FQFAgent:
         return quantile_huber_loss
 
     def evaluate(self):
-        episodes = 5
+        # NOTE: This is not the same protocol with the original paper.
+
+        episodes = 10
         returns = np.zeros((episodes,), dtype=np.float32)
 
         for i in range(episodes):
@@ -316,8 +319,9 @@ class FQFAgent:
         mean_return = np.mean(returns)
         std_return = np.std(returns)
 
+        # We log evaluation results along with training frames = 4 * steps.
         self.writer.add_scalar(
-            'reward/test', mean_return, self.steps)
+            'reward/test', mean_return, 4 * self.steps)
         print('-' * 60)
         print(f'Num steps: {self.steps:<5}  '
               f'reward: {mean_return:<5.1f} +/- {std_return:<5.1f}')
