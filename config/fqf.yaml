@@ -1,4 +1,4 @@
-num_steps: 500000
+num_steps: 50000000  # It equals to 200M frames.
 batch_size: 32
 num_taus: 32
 num_cosines: 64
@@ -16,4 +16,4 @@ epsilon_train: 0.01
 epsilon_eval: 0.001
 log_interval: 50
 eval_interval: 10000
-num_eval_steps: 125000  # It's ignored in the current code.
+num_eval_steps: 125000

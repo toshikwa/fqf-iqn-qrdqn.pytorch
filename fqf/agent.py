@@ -61,7 +61,7 @@ class FQFAgent:
             os.makedirs(self.summary_dir)
 
         self.writer = SummaryWriter(log_dir=self.summary_dir)
-        self.train_rewards = RunningMeanStats(log_interval)
+        self.train_returns = RunningMeanStats(log_interval)
 
         self.steps = 0
         self.learning_steps = 0
@@ -123,7 +123,7 @@ class FQFAgent:
 
     def train_episode(self):
         self.episodes += 1
-        episode_reward = 0.
+        episode_return = 0.
         episode_steps = 0
         done = False
         state = self.env.reset()
@@ -137,7 +137,7 @@ class FQFAgent:
             next_state, reward, done, _ = self.env.step(action)
             self.steps += 1
             episode_steps += 1
-            episode_reward += reward
+            episode_return += reward
 
             self.memory.append(
                 state, action, reward, next_state, done)
@@ -151,16 +151,16 @@ class FQFAgent:
 
             state = next_state
 
-        # We log running mean of training rewards.
-        self.train_rewards.append(episode_reward)
+        # We log running mean of training returns.
+        self.train_returns.append(episode_return)
 
         if self.episodes % self.log_interval == 0:
             self.writer.add_scalar(
-                'reward/train', self.train_rewards.get(), self.steps)
+                'return/train', self.train_returns.get(), self.steps)
 
-        print(f'episode: {self.episodes:<4}  '
+        print(f'Episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '
-              f'reward: {episode_reward:<5.1f}')
+              f'return: {episode_return:<5.1f}')
 
     def learn(self):
         self.learning_steps += 1
@@ -297,34 +297,38 @@ class FQFAgent:
         return quantile_huber_loss
 
     def evaluate(self):
-        # NOTE: This is not the same protocol with the original paper.
+        num_episodes = 0
+        num_steps = 0
+        total_return = 0.0
 
-        episodes = 10
-        returns = np.zeros((episodes,), dtype=np.float32)
-
-        for i in range(episodes):
+        while True:
             state = self.test_env.reset()
-            episode_reward = 0.
+            episode_return = 0.0
             done = False
             while not done:
                 if self.is_greedy(eval=True):
                     action = self.explore()
                 else:
                     action = self.exploit(state)
-                next_state, reward, done, _ = self.test_env.step(action)
-                episode_reward += reward
-                state = next_state
-            returns[i] = episode_reward
 
-        mean_return = np.mean(returns)
-        std_return = np.std(returns)
+                next_state, reward, done, _ = self.test_env.step(action)
+                num_steps += 1
+                episode_return += reward
+                state = next_state
+                if done:
+                    num_episodes += 1
+                    total_return += episode_return
+                if num_steps > self.num_eval_steps:
+                    break
+
+        mean_return = total_return / num_episodes
 
         # We log evaluation results along with training frames = 4 * steps.
         self.writer.add_scalar(
-            'reward/test', mean_return, 4 * self.steps)
+            'return/test', mean_return, 4 * self.steps)
         print('-' * 60)
         print(f'Num steps: {self.steps:<5}  '
-              f'reward: {mean_return:<5.1f} +/- {std_return:<5.1f}')
+              f'return: {mean_return:<5.1f}')
         print('-' * 60)
 
     def __del__(self):
