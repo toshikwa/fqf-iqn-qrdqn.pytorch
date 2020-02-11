@@ -1,4 +1,4 @@
-# FQF, IQN in PyTorch
+# FQF and IQN in PyTorch
 
 A PyTorch implementation of Fully parameterized Quantile Function(FQF)[[1]](https://arxiv.org/abs/1911.02140) and Implicit Quantile Networks(IQN)[[2]](https://arxiv.org/abs/1806.06923). I tried to make it easy for readers to understand algorithms. Please let me know if you have any questions.
 
