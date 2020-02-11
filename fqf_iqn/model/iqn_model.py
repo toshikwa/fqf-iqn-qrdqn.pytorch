@@ -1,12 +1,9 @@
 import os
 import torch
 
-from .network import DQNBase, FractionProposalNetwork, QuantileValueNetwork
-
-
-def grad_false(network):
-    for param in network.parameters():
-        param.requires_grad = False
+from fqf_iqn.network import DQNBase, FractionProposalNetwork,\
+    QuantileValueNetwork
+from fqf_iqn.utils import grad_false
 
 
 class FQF:

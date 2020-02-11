@@ -3,8 +3,8 @@ import yaml
 import argparse
 from datetime import datetime
 
-from fqf.env import make_pytorch_env
-from fqf.agent import FQFAgent
+from fqf_iqn.env import make_pytorch_env
+from fqf_iqn.agent import FQFAgent
 
 
 def run(args):
