@@ -159,8 +159,9 @@ class BaseAgent:
                 if done:
                     num_episodes += 1
                     total_return += episode_return
-                if num_steps > self.num_eval_steps:
-                    break
+
+            if num_steps > self.num_eval_steps:
+                break
 
         mean_return = total_return / num_episodes
 
