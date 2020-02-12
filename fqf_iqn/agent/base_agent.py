@@ -92,6 +92,9 @@ class BaseAgent:
     def save_models(self):
         raise NotImplementedError
 
+    def update_target(self):
+        raise NotImplementedError
+
     def train_episode(self):
         self.episodes += 1
         episode_return = 0.
@@ -125,9 +128,10 @@ class BaseAgent:
         # We log running mean of training returns.
         self.train_returns.append(episode_return)
 
+        # We log evaluation results along with training frames = 4 * steps.
         if self.episodes % self.log_interval == 0:
             self.writer.add_scalar(
-                'return/train', self.train_returns.get(), self.steps)
+                'return/train', self.train_returns.get(), 4 * self.steps)
 
         print(f'Episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '

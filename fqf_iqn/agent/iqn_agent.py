@@ -1,8 +1,10 @@
+import os
 import torch
 from torch.optim import Adam
 
-from fqf_iqn.model import IQN
-from fqf_iqn.utils import update_params, calculate_quantile_huber_loss
+from fqf_iqn.network import DQNBase, QuantileValueNetwork
+from fqf_iqn.utils import grad_false, update_params,\
+    calculate_quantile_huber_loss
 from .base_agent import BaseAgent
 
 
@@ -21,15 +23,26 @@ class IQNAgent(BaseAgent):
             start_steps, epsilon_train, epsilon_eval, log_interval,
             eval_interval, num_eval_steps, cuda, seed)
 
-        # Implicit Quantile Networks.
-        self.iqn = IQN(
-            num_channels=self.env.observation_space.shape[0],
-            num_actions=self.num_actions, N=N, N_dash=N_dash, K=K,
-            num_cosines=num_cosines, device=self.device)
+        # Feature extractor.
+        self.dqn_base = DQNBase(
+            num_channels=env.observation_space.shape[0]).to(self.device)
+        # Quantile Value Network.
+        self.quantile_net = QuantileValueNetwork(
+            num_actions=self.num_actions, num_cosines=num_cosines
+            ).to(self.device)
+        # Target Network.
+        self.target_net = QuantileValueNetwork(
+            num_actions=self.num_actions, num_cosines=num_cosines
+            ).eval().to(self.device)
+
+        # Copy parameters of the learning network to the target network.
+        self.update_target()
+        # Disable gradient calculations of the target network.
+        grad_false(self.target_net)
 
         self.optim = Adam(
-            list(self.iqn.dqn_base.parameters())
-            + list(self.iqn.quantile_net.parameters()),
+            list(self.dqn_base.parameters())
+            + list(self.quantile_net.parameters()),
             lr=lr, eps=1e-2/batch_size)
 
         self.N = N
@@ -38,27 +51,49 @@ class IQNAgent(BaseAgent):
         self.num_cosines = num_cosines
         self.kappa = kappa
 
+    def update_target(self):
+        self.target_net.load_state_dict(
+            self.quantile_net.state_dict())
+
     def exploit(self, state):
         # Act without randomness.
         state = torch.ByteTensor(
             state).unsqueeze(0).to(self.device).float() / 255.
         with torch.no_grad():
-            state_embedding = self.iqn.dqn_base(state)
-            action = self.iqn.calculate_q(
+            state_embedding = self.dqn_base(state)
+            action = self.calculate_q(
                 state_embedding).argmax().item()
         return action
+
+    def calculate_q(self, state_embeddings):
+        batch_size = state_embeddings.shape[0]
+
+        # Calculate random fractions.
+        taus = torch.rand(
+            batch_size, self.K, dtype=state_embeddings.dtype,
+            device=state_embeddings.device)
+
+        # Calculate quantiles of random fractions.
+        quantiles = self.quantile_net(state_embeddings, taus)
+        assert quantiles.shape == (batch_size, self.K, self.num_actions)
+
+        # Calculate expectations of values.
+        q = quantiles.mean(dim=1)
+        assert q.shape == (batch_size, self.num_actions)
+
+        return q
 
     def learn(self):
         self.learning_steps += 1
 
         if self.steps % self.target_update_interval == 0:
-            self.iqn.update_target()
+            self.update_target()
 
         states, actions, rewards, next_states, dones =\
             self.memory.sample(self.batch_size)
 
         # Calculate features of states.
-        state_embeddings = self.iqn.dqn_base(states)
+        state_embeddings = self.dqn_base(states)
 
         loss = self.calculate_loss(
             state_embeddings, actions, rewards, next_states, dones)
@@ -69,7 +104,7 @@ class IQNAgent(BaseAgent):
             self.writer.add_scalar(
                 'loss/loss', loss.detach().item(), self.learning_steps)
             with torch.no_grad():
-                mean_q = self.iqn.calculate_q(state_embeddings).mean()
+                mean_q = self.calculate_q(state_embeddings).mean()
             self.writer.add_scalar(
                 'stats/mean_Q', mean_q, self.learning_steps)
 
@@ -82,7 +117,7 @@ class IQNAgent(BaseAgent):
             device=state_embeddings.device)
 
         # Calculate quantile values of current states and all actions.
-        current_s_quantiles = self.iqn.quantile_net(state_embeddings, taus)
+        current_s_quantiles = self.quantile_net(state_embeddings, taus)
 
         # Repeat current actions into (batch_size, N, 1).
         action_index = actions[..., None].expand(
@@ -94,7 +129,7 @@ class IQNAgent(BaseAgent):
 
         with torch.no_grad():
             # Calculate features of next states.
-            next_state_embeddings = self.iqn.dqn_base(next_states)
+            next_state_embeddings = self.dqn_base(next_states)
 
             # Sample next fractions.
             tau_dashes = torch.rand(
@@ -102,12 +137,12 @@ class IQNAgent(BaseAgent):
                 device=state_embeddings.device)
 
             # Calculate quantile values of next states and all actions.
-            next_s_quantiles = self.iqn.target_net(
+            next_s_quantiles = self.target_net(
                 next_state_embeddings, tau_dashes)
 
             # Calculate next greedy actions.
             next_actions = torch.argmax(
-                self.iqn.calculate_q(next_state_embeddings), dim=1
+                self.calculate_q(next_state_embeddings), dim=1
                 ).view(self.batch_size, 1, 1)
 
             # Repeat next actions into (batch_size, num_taus, 1).
@@ -135,4 +170,20 @@ class IQNAgent(BaseAgent):
         return quantile_huber_loss
 
     def save_models(self):
-        self.iqn.save(self.model_dir)
+        torch.save(
+            self.dqn_base.state_dict(),
+            os.path.join(self.model_dir, 'dqn_base.pth'))
+        torch.save(
+            self.quantile_net.state_dict(),
+            os.path.join(self.model_dir, 'quantile_net.pth'))
+        torch.save(
+            self.target_net.state_dict(),
+            os.path.join(self.model_dir, 'target_net.pth'))
+
+    def load_models(self):
+        self.dqn_base.load_state_dict(torch.load(
+            os.path.join(self.model_dir, 'dqn_base.pth')))
+        self.quantile_net.load_state_dict(torch.load(
+            os.path.join(self.model_dir, 'quantile_net.pth')))
+        self.target_net.load_state_dict(torch.load(
+            os.path.join(self.model_dir, 'target_net.pth')))
