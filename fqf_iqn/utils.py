@@ -9,7 +9,7 @@ def update_params(optim, loss, retain_graph=False):
     optim.step()
 
 
-def grad_false(network):
+def disable_gradients(network):
     for param in network.parameters():
         param.requires_grad = False
 

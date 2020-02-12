@@ -3,7 +3,7 @@ import torch
 from torch.optim import Adam
 
 from fqf_iqn.network import DQNBase, QuantileValueNetwork
-from fqf_iqn.utils import grad_false, update_params,\
+from fqf_iqn.utils import disable_gradients, update_params,\
     calculate_quantile_huber_loss
 from .base_agent import BaseAgent
 
@@ -37,8 +37,8 @@ class IQNAgent(BaseAgent):
 
         # Copy parameters of the learning network to the target network.
         self.update_target()
-        # Disable gradient calculations of the target network.
-        grad_false(self.target_net)
+        # Disable calculations of gradients of the target network.
+        disable_gradients(self.target_net)
 
         self.optim = Adam(
             list(self.dqn_base.parameters())
