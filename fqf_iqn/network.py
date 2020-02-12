@@ -60,9 +60,12 @@ class FractionProposalNetwork(nn.Module):
         batch_size = state_embeddings.shape[0]
 
         # Calculate probabilities q_i in the paper.
-        log_probs = F.log_softmax(self.net(state_embeddings), dim=1)
-        probs = log_probs.exp()
+        probs = F.softmax(self.net(state_embeddings), dim=1)
         assert probs.shape == (batch_size, self.num_taus)
+
+        # Avoid numerical instability.
+        z = (probs == 0.0).float() * 1e-8
+        log_probs = torch.log(probs + z)
 
         tau_0 = torch.zeros(
             (batch_size, 1), dtype=state_embeddings.dtype,
