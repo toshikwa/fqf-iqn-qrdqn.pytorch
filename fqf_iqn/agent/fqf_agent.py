@@ -144,17 +144,17 @@ class FQFAgent(BaseAgent):
     def calculate_fraction_loss(self, state_embeddings, taus, hat_taus,
                                 actions):
 
-        gradient_of_taus = self.calculate_gradients_of_tau_s(
-            state_embeddings, taus, hat_taus)
-        assert gradient_of_taus.shape == (
-            self.batch_size, self.num_taus-1, self.num_actions)
-
-        # action_index = actions[..., None].expand(
-        #     self.batch_size, self.num_taus-1, 1)
-        # gradient_of_taus = self.fqf.calculate_gradients_of_tau_sa(
-        #     state_embeddings, taus, hat_taus, action_index)
+        # gradient_of_taus = self.calculate_gradients_of_tau_s(
+        #     state_embeddings, taus, hat_taus)
         # assert gradient_of_taus.shape == (
-        #     self.batch_size, self.num_taus-1, 1)
+        #     self.batch_size, self.num_taus-1, self.num_actions)
+
+        action_index = actions[..., None].expand(
+            self.batch_size, self.num_taus-1, 1)
+        gradient_of_taus = self.calculate_gradients_of_tau_sa(
+            state_embeddings, taus, hat_taus, action_index)
+        assert gradient_of_taus.shape == (
+            self.batch_size, self.num_taus-1, 1)
 
         fraction_loss = (
             gradient_of_taus * taus[:, 1:-1, None]).mean(dim=0).sum()
