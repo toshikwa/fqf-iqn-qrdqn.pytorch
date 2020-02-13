@@ -14,7 +14,7 @@ class BaseAgent:
                  update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
                  log_interval=50, eval_interval=250000, num_eval_steps=125000,
-                 cuda=True, seed=0):
+                 grad_cliping=5.0, cuda=True, seed=0):
 
         self.env = env
         self.test_env = test_env
@@ -60,6 +60,7 @@ class BaseAgent:
         self.epsilon_eval = epsilon_eval
         self.update_interval = update_interval
         self.target_update_interval = target_update_interval
+        self.grad_cliping = grad_cliping
 
     def run(self):
         while True:
