@@ -1,6 +1,7 @@
 import os
 import torch
 from torch.optim import Adam, RMSprop
+# from torch.optim.lr_scheduler import MultiStepLR
 
 from fqf_iqn.network import DQNBase, FractionProposalNetwork,\
     QuantileValueNetwork
@@ -13,17 +14,17 @@ class FQFAgent(BaseAgent):
 
     def __init__(self, env, test_env, log_dir, num_steps=5*(10**7),
                  batch_size=32, num_taus=32, num_cosines=64, ent_coef=1.0,
-                 kappa=1.0, fraction_lr=2.5e-9, quantile_lr=5e-5,
+                 kappa=1.0, quantile_lr=5e-5, fraction_lr=2.5e-9,
                  memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
                  log_interval=50, eval_interval=250000, num_eval_steps=125000,
-                 cuda=True, seed=0):
+                 grad_cliping=5.0, cuda=True, seed=0):
         super(FQFAgent, self).__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size,
             gamma, multi_step, update_interval, target_update_interval,
             start_steps, epsilon_train, epsilon_eval, log_interval,
-            eval_interval, num_eval_steps, cuda, seed)
+            eval_interval, num_eval_steps, grad_cliping, cuda, seed)
 
         # Feature extractor.
         self.dqn_base = DQNBase(
@@ -45,13 +46,19 @@ class FQFAgent(BaseAgent):
         # Disable calculations of gradients of the target network.
         disable_gradients(self.target_net)
 
-        self.fraction_optim = RMSprop(
-            self.fraction_net.parameters(),
-            lr=fraction_lr, eps=1e-2/batch_size)
         self.quantile_optim = Adam(
             list(self.dqn_base.parameters())
             + list(self.quantile_net.parameters()),
-            lr=quantile_lr, eps=1e-2/batch_size)
+            lr=quantile_lr, eps=0.0003125)
+        self.fraction_optim = RMSprop(
+            self.fraction_net.parameters(),
+            lr=fraction_lr, alpha=0.95, eps=0.00001)
+
+        # We sweap the learning rate of Fraction Proposal Network from
+        # 2.5e-5 to 2.5e-9 during training.
+        # self.fraction_optim_scheduler = MultiStepLR(
+        #     self.fraction_optim, gamma=0.1,
+        #     milestones=[10**6//4, 4*10**6//4, 2*10**7//4, 10**8//4])
 
         self.num_taus = num_taus
         self.num_cosines = num_cosines
@@ -107,18 +114,27 @@ class FQFAgent(BaseAgent):
         taus, hat_taus, entropies = self.fraction_net(state_embeddings)
 
         fraction_loss = self.calculate_fraction_loss(
-            state_embeddings, taus, hat_taus, actions)
+            state_embeddings, taus, hat_taus)
 
         quantile_loss = self.calculate_quantile_loss(
             state_embeddings, taus, hat_taus, actions, rewards,
             next_states, dones)
 
-        # We use entropy loss as a regularizer to prevent the distribution
-        # from degenerating into a deterministic one.
+        # You can use entropy loss as a regularizer to prevent the distribution
+        # from degenerating into a deterministic one, which happens rarely. We
+        # don't use it by default.
         entropy_loss = -self.ent_coef * entropies.mean()
 
-        update_params(self.fraction_optim, fraction_loss + entropy_loss, True)
-        update_params(self.quantile_optim, quantile_loss + entropy_loss)
+        update_params(
+            self.fraction_optim, fraction_loss + entropy_loss,
+            networks=[self.fraction_net], retain_graph=True,
+            grad_cliping=self.grad_cliping)
+        update_params(
+            self.quantile_optim, quantile_loss + entropy_loss,
+            networks=[self.dqn_base, self.quantile_net],
+            retain_graph=False, grad_cliping=self.grad_cliping)
+
+        # self.fraction_optim_scheduler.step()
 
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
@@ -138,26 +154,16 @@ class FQFAgent(BaseAgent):
             self.writer.add_scalar(
                 'stats/mean_Q', mean_q, self.learning_steps)
             self.writer.add_scalar(
-                'stats/entropy', entropies.mean().detach().item(),
-                self.learning_steps)
+                'stats/mean_entropy_of_value_distribution',
+                entropies.mean().detach().item(), self.learning_steps)
 
-    def calculate_fraction_loss(self, state_embeddings, taus, hat_taus,
-                                actions):
+    def calculate_fraction_loss(self, state_embeddings, taus, hat_taus):
 
-        # gradient_of_taus = self.calculate_gradients_of_tau_s(
-        #     state_embeddings, taus, hat_taus)
-        # assert gradient_of_taus.shape == (
-        #     self.batch_size, self.num_taus-1, self.num_actions)
-
-        action_index = actions[..., None].expand(
-            self.batch_size, self.num_taus-1, 1)
-        gradient_of_taus = self.calculate_gradients_of_tau_sa(
-            state_embeddings, taus, hat_taus, action_index)
-        assert gradient_of_taus.shape == (
-            self.batch_size, self.num_taus-1, 1)
+        gradient_of_taus = self.calculate_gradients_of_tau(
+            state_embeddings, taus, hat_taus)
 
         fraction_loss = (
-            gradient_of_taus * taus[:, 1:-1, None]).mean(dim=0).sum()
+            gradient_of_taus * taus[:, 1:-1, None]).sum(dim=1).mean()
 
         return fraction_loss
 
@@ -219,7 +225,8 @@ class FQFAgent(BaseAgent):
 
         return quantile_huber_loss
 
-    def calculate_gradients_of_tau_s(self, state_embeddings, taus, hat_taus):
+    def calculate_gradients_of_tau(self, state_embeddings, taus, hat_taus):
+
         batch_size = state_embeddings.shape[0]
 
         with torch.no_grad():
@@ -237,34 +244,6 @@ class FQFAgent(BaseAgent):
                 state_embeddings, hat_taus[:, :-1])
             assert quantile_hat_tau_i_minus_1.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
-
-        gradients =\
-            2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
-
-        return gradients
-
-    def calculate_gradients_of_tau_sa(self, state_embeddings, taus, hat_taus,
-                                      action_index):
-        batch_size = state_embeddings.shape[0]
-
-        with torch.no_grad():
-            quantile_tau_i = self.quantile_net(
-                state_embeddings, taus[:, 1:-1]).gather(
-                dim=2, index=action_index)
-            assert quantile_tau_i.shape == (
-                batch_size, self.num_taus-1, 1)
-
-            quantile_hat_tau_i = self.quantile_net(
-                state_embeddings, hat_taus[:, 1:]).gather(
-                dim=2, index=action_index)
-            assert quantile_hat_tau_i.shape == (
-                batch_size, self.num_taus-1, 1)
-
-            quantile_hat_tau_i_minus_1 = self.quantile_net(
-                state_embeddings, hat_taus[:, :-1]).gather(
-                dim=2, index=action_index)
-            assert quantile_hat_tau_i_minus_1.shape == (
-                batch_size, self.num_taus-1, 1)
 
         gradients =\
             2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
