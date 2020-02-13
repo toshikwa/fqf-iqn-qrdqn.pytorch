@@ -16,12 +16,12 @@ class IQNAgent(BaseAgent):
                  multi_step=1, update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
                  log_interval=50, eval_interval=250000, num_eval_steps=125000,
-                 cuda=True, seed=0):
+                 grad_cliping=5.0, cuda=True, seed=0):
         super(IQNAgent, self).__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size,
             gamma, multi_step, update_interval, target_update_interval,
             start_steps, epsilon_train, epsilon_eval, log_interval,
-            eval_interval, num_eval_steps, cuda, seed)
+            eval_interval, num_eval_steps, grad_cliping, cuda, seed)
 
         # Feature extractor.
         self.dqn_base = DQNBase(
@@ -95,14 +95,18 @@ class IQNAgent(BaseAgent):
         # Calculate features of states.
         state_embeddings = self.dqn_base(states)
 
-        loss = self.calculate_loss(
+        quantile_loss = self.calculate_loss(
             state_embeddings, actions, rewards, next_states, dones)
 
-        update_params(self.optim, loss)
+        update_params(
+            self.optim, quantile_loss,
+            networks=[self.dqn_base, self.quantile_net],
+            retain_graph=False, grad_cliping=self.grad_cliping)
 
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
-                'loss/loss', loss.detach().item(), self.learning_steps)
+                'loss/quantile_loss', quantile_loss.detach().item(),
+                self.learning_steps)
             with torch.no_grad():
                 mean_q = self.calculate_q(state_embeddings).mean()
             self.writer.add_scalar(

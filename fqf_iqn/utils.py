@@ -3,9 +3,13 @@ import numpy as np
 import torch
 
 
-def update_params(optim, loss, retain_graph=False):
+def update_params(optim, loss, networks, retain_graph=False,
+                  grad_cliping=None):
     optim.zero_grad()
     loss.backward(retain_graph=retain_graph)
+    if grad_cliping is not None:
+        for net in networks:
+            torch.nn.utils.clip_grad_norm_(net.parameters(), grad_cliping)
     optim.step()
 
 

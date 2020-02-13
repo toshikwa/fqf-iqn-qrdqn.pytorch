@@ -17,3 +17,4 @@ epsilon_eval: 0.001
 log_interval: 50
 eval_interval: 250000
 num_eval_steps: 125000  # It equals to 500k frames.
+grad_cliping: 5.0

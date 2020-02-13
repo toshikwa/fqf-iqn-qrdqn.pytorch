@@ -4,9 +4,9 @@ from torch import nn
 import torch.nn.functional as F
 
 
-def weights_init_xavier(m):
+def weights_init_xavier(m, gain=1.0):
     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
-        torch.nn.init.xavier_uniform_(m.weight, gain=1)
+        torch.nn.init.xavier_uniform_(m.weight, gain=gain)
         if m.bias is not None:
             torch.nn.init.constant_(m.bias, 0)
 
@@ -29,7 +29,7 @@ class DQNBase(nn.Module):
             nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
             nn.ReLU(),
             Flatten(),
-        ).apply(weights_init_xavier)
+        )
 
         self.embedding_dim = embedding_dim
 
@@ -50,7 +50,7 @@ class FractionProposalNetwork(nn.Module):
 
         self.net = nn.Sequential(
             nn.Linear(embedding_dim, num_taus)
-        )
+        ).apply(lambda x: weights_init_xavier(x, gain=0.01))
 
         self.num_taus = num_taus
         self.embedding_dim = embedding_dim
@@ -80,7 +80,7 @@ class FractionProposalNetwork(nn.Module):
         hat_taus = (taus[:, :-1] + taus[:, 1:]) / 2.
         assert hat_taus.shape == (batch_size, self.num_taus)
 
-        # Calculate entropies of the distributions.
+        # Calculate entropies of value distributions.
         entropies = -(log_probs * probs).sum(dim=-1, keepdim=True)
         assert entropies.shape == (batch_size, 1)
 
