@@ -128,7 +128,9 @@ class BaseAgent:
                 self.learning_time.append(time() - l_time)
 
             if self.steps % self.eval_interval == 0:
+                e_time = time()
                 self.evaluate()
+                t_time += time() - e_time
                 self.save_models()
 
             state = next_state
