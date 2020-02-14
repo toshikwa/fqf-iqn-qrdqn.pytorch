@@ -134,7 +134,7 @@ class BaseAgent:
             state = next_state
 
         # We log running mean of stats.
-        self.training_time.append(time() - t_time)
+        self.training_time.append((time() - t_time) / episode_steps)
         self.train_return.append(episode_return)
 
         # We log evaluation results along with training frames = 4 * steps.
