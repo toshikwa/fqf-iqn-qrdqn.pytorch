@@ -1,7 +1,7 @@
 import os
 import torch
 from torch.optim import Adam, RMSprop
-from torch.optim.lr_scheduler import MultiStepLR
+# from torch.optim.lr_scheduler import MultiStepLR
 
 from fqf_iqn.network import DQNBase, FractionProposalNetwork,\
     QuantileValueNetwork
@@ -157,7 +157,7 @@ class FQFAgent(BaseAgent):
                 'stats/mean_entropy_of_value_distribution',
                 entropies.mean().detach().item(), self.learning_steps)
             self.writer.add_scalar(
-                'stats/learning_time', self.learning_time.get(),
+                'stats/mean_learning_time', self.learning_time.get(),
                 self.learning_steps)
 
     def calculate_fraction_loss(self, state_embeddings, taus, hat_taus):
