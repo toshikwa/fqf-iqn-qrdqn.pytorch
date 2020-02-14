@@ -130,7 +130,10 @@ class BaseAgent:
             if self.steps % self.eval_interval == 0:
                 e_time = time()
                 self.evaluate()
-                t_time += time() - e_time
+                e_time = time() - e_time
+                self.writer.add_scalar(
+                    'time/evaluation_time', e_time, 4 * self.steps)
+                t_time += e_time
                 self.save_models()
 
             state = next_state
@@ -144,7 +147,7 @@ class BaseAgent:
             self.writer.add_scalar(
                 'return/train', self.train_return.get(), 4 * self.steps)
             self.writer.add_scalar(
-                'stats/mean_training_time', self.training_time.get(),
+                'time/mean_training_time', self.training_time.get(),
                 4 * self.steps)
 
         print(f'Episode: {self.episodes:<4}  '

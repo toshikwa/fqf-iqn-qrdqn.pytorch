@@ -157,7 +157,7 @@ class FQFAgent(BaseAgent):
                 'stats/mean_entropy_of_value_distribution',
                 entropies.mean().detach().item(), self.learning_steps)
             self.writer.add_scalar(
-                'stats/mean_learning_time', self.learning_time.get(),
+                'time/mean_learning_time', self.learning_time.get(),
                 self.learning_steps)
 
     def calculate_fraction_loss(self, state_embeddings, taus, hat_taus):

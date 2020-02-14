@@ -112,7 +112,7 @@ class IQNAgent(BaseAgent):
             self.writer.add_scalar(
                 'stats/mean_Q', mean_q, self.learning_steps)
             self.writer.add_scalar(
-                'stats/mean_learning_time', self.learning_time.get(),
+                'time/mean_learning_time', self.learning_time.get(),
                 self.learning_steps)
 
     def calculate_loss(self, state_embeddings, actions, rewards, next_states,
