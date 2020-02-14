@@ -52,13 +52,13 @@ class FQFAgent(BaseAgent):
             lr=quantile_lr, eps=0.0003125)
         self.fraction_optim = RMSprop(
             self.fraction_net.parameters(),
-            lr=10**4 * fraction_lr, alpha=0.95, eps=0.00001)
+            lr=fraction_lr, alpha=0.95, eps=0.00001)
 
         # We sweap the learning rate of Fraction Proposal Network from
         # 2.5e-5 to 2.5e-9 during training.
-        self.lr_sweeper = MultiStepLR(
-            self.fraction_optim, gamma=0.1,
-            milestones=[10**6//4, 4*10**6//4, 2*10**7//4, 10**8//4])
+        # self.lr_sweeper = MultiStepLR(
+        #     self.fraction_optim, gamma=0.1,
+        #     milestones=[10**4//4, 4*10**4//4, 10**6//4, 10**7//4])
 
         self.num_taus = num_taus
         self.num_cosines = num_cosines
@@ -134,7 +134,7 @@ class FQFAgent(BaseAgent):
             networks=[self.dqn_base, self.quantile_net],
             retain_graph=False, grad_cliping=self.grad_cliping)
 
-        self.lr_sweeper.step()
+        # self.lr_sweeper.step()
 
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
