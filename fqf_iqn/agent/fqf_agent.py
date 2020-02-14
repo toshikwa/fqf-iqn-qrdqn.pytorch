@@ -1,7 +1,7 @@
 import os
 import torch
 from torch.optim import Adam, RMSprop
-# from torch.optim.lr_scheduler import MultiStepLR
+from torch.optim.lr_scheduler import MultiStepLR
 
 from fqf_iqn.network import DQNBase, FractionProposalNetwork,\
     QuantileValueNetwork
@@ -13,7 +13,7 @@ from .base_agent import BaseAgent
 class FQFAgent(BaseAgent):
 
     def __init__(self, env, test_env, log_dir, num_steps=5*(10**7),
-                 batch_size=32, num_taus=32, num_cosines=64, ent_coef=1.0,
+                 batch_size=32, num_taus=32, num_cosines=64, ent_coef=0,
                  kappa=1.0, quantile_lr=5e-5, fraction_lr=2.5e-9,
                  memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
@@ -52,13 +52,13 @@ class FQFAgent(BaseAgent):
             lr=quantile_lr, eps=0.0003125)
         self.fraction_optim = RMSprop(
             self.fraction_net.parameters(),
-            lr=fraction_lr, alpha=0.95, eps=0.00001)
+            lr=10**4 * fraction_lr, alpha=0.95, eps=0.00001)
 
         # We sweap the learning rate of Fraction Proposal Network from
         # 2.5e-5 to 2.5e-9 during training.
-        # self.fraction_optim_scheduler = MultiStepLR(
-        #     self.fraction_optim, gamma=0.1,
-        #     milestones=[10**6//4, 4*10**6//4, 2*10**7//4, 10**8//4])
+        self.lr_sweeper = MultiStepLR(
+            self.fraction_optim, gamma=0.1,
+            milestones=[10**6//4, 4*10**6//4, 2*10**7//4, 10**8//4])
 
         self.num_taus = num_taus
         self.num_cosines = num_cosines
@@ -134,7 +134,7 @@ class FQFAgent(BaseAgent):
             networks=[self.dqn_base, self.quantile_net],
             retain_graph=False, grad_cliping=self.grad_cliping)
 
-        # self.fraction_optim_scheduler.step()
+        self.lr_sweeper.step()
 
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
@@ -163,7 +163,7 @@ class FQFAgent(BaseAgent):
             state_embeddings, taus, hat_taus)
 
         fraction_loss = (
-            gradient_of_taus * taus[:, 1:-1, None]).sum(dim=1).mean()
+            gradient_of_taus.mean(dim=2) * taus[:, 1:-1]).sum(dim=1).mean()
 
         return fraction_loss
 

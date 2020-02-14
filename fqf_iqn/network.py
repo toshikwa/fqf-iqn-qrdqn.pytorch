@@ -11,6 +11,13 @@ def weights_init_xavier(m, gain=1.0):
             torch.nn.init.constant_(m.bias, 0)
 
 
+def weights_init_he(m):
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv2d):
+        torch.nn.init.kaiming_uniform_(m.weight)
+        if m.bias is not None:
+            torch.nn.init.constant_(m.bias, 0)
+
+
 class Flatten(nn.Module):
     def forward(self, x):
         return x.view(x.size(0), -1)
@@ -29,7 +36,7 @@ class DQNBase(nn.Module):
             nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=0),
             nn.ReLU(),
             Flatten(),
-        )
+        ).apply(weights_init_he)
 
         self.embedding_dim = embedding_dim
 
@@ -49,7 +56,7 @@ class FractionProposalNetwork(nn.Module):
         super(FractionProposalNetwork, self).__init__()
 
         self.net = nn.Sequential(
-            nn.Linear(embedding_dim, num_taus)
+            nn.Linear(embedding_dim, num_taus, bias=False)
         ).apply(lambda x: weights_init_xavier(x, gain=0.01))
 
         self.num_taus = num_taus
@@ -64,7 +71,7 @@ class FractionProposalNetwork(nn.Module):
         assert probs.shape == (batch_size, self.num_taus)
 
         # Avoid numerical instability.
-        z = (probs == 0.0).float() * 1e-8
+        z = (probs < 1e-8).float() * 1e-8
         log_probs = torch.log(probs + z)
 
         tau_0 = torch.zeros(
@@ -121,8 +128,6 @@ class QuantileValueNetwork(nn.Module):
 
         # Calculate embeddings of taus.
         tau_embeddings = self.calculate_embedding_of_taus(taus)
-        assert tau_embeddings.shape == (
-            batch_size, num_taus, self.embedding_dim)
 
         # Calculate embeddings of states and taus.
         embeddings = (state_embeddings * tau_embeddings).view(
