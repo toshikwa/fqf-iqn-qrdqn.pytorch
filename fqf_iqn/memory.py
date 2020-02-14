@@ -58,8 +58,8 @@ class DummyMemory(dict):
         self.reset()
 
     def reset(self):
-        for key in self.state_keys:
-            self[key] = []
+        self['state'] = []
+        self['next_state'] = []
 
         self['action'] = np.empty((self.capacity, 1), dtype=np.int64)
         self['reward'] = np.empty((self.capacity, 1), dtype=np.float32)
@@ -86,8 +86,8 @@ class DummyMemory(dict):
 
     def truncate(self):
         while len(self) > self.capacity:
-            for key in self.state_keys:
-                self[key].pop()
+            del self['state'][0]
+            del self['next_state'][0]
 
     def sample(self, batch_size):
         indices = np.random.randint(low=0, high=len(self), size=batch_size)
