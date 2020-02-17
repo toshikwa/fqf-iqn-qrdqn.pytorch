@@ -19,7 +19,7 @@ def run(args):
     # Specify the directory to log.
     time = datetime.now().strftime("%Y%m%d-%H%M")
     log_dir = os.path.join(
-        'logs', args.env_id, f'IQN-{time}')
+        'logs', args.env_id, f'IQN-{args.seed}-{time}')
 
     # Create the agent and run.
     agent = IQNAgent(
