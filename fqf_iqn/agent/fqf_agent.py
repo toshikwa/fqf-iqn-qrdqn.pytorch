@@ -254,7 +254,8 @@ class FQFAgent(BaseAgent):
         return gradients
 
     def save_models(self, save_dir):
-        super(FQFAgent, self).save_models(save_dir)
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
         torch.save(
             self.dqn_base.state_dict(),

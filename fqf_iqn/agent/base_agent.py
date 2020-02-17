@@ -95,8 +95,7 @@ class BaseAgent:
         raise NotImplementedError
 
     def save_models(self, save_dir):
-        if not os.path.join(save_dir):
-            os.makedirs(save_dir)
+        raise NotImplementedError
 
     def load_models(self, save_dir):
         raise NotImplementedError

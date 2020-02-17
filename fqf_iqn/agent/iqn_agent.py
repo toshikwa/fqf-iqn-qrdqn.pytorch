@@ -177,7 +177,8 @@ class IQNAgent(BaseAgent):
         return quantile_huber_loss
 
     def save_models(self, save_dir):
-        super(IQNAgent, self).save_models(save_dir)
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
 
         torch.save(
             self.dqn_base.state_dict(),
