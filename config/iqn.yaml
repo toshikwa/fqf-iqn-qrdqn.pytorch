@@ -14,7 +14,7 @@ target_update_interval: 10000
 start_steps: 50000
 epsilon_train: 0.01
 epsilon_eval: 0.001
-log_interval: 50
+log_interval: 100
 eval_interval: 250000
 num_eval_steps: 125000  # It equals to 500k frames.
 grad_cliping: 5.0

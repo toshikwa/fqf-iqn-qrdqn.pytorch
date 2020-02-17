@@ -176,7 +176,9 @@ class IQNAgent(BaseAgent):
 
         return quantile_huber_loss
 
-    def save_models(self):
+    def save_models(self, save_dir):
+        super(IQNAgent, self).save_models(save_dir)
+
         torch.save(
             self.dqn_base.state_dict(),
             os.path.join(self.model_dir, 'dqn_base.pth'))
@@ -187,7 +189,7 @@ class IQNAgent(BaseAgent):
             self.target_net.state_dict(),
             os.path.join(self.model_dir, 'target_net.pth'))
 
-    def load_models(self):
+    def load_models(self, save_dir):
         self.dqn_base.load_state_dict(torch.load(
             os.path.join(self.model_dir, 'dqn_base.pth')))
         self.quantile_net.load_state_dict(torch.load(

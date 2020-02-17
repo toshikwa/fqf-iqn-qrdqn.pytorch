@@ -51,6 +51,7 @@ class BaseAgent:
         self.steps = 0
         self.learning_steps = 0
         self.episodes = 0
+        self.best_eval_score = -np.inf
         self.num_actions = self.env.action_space.n
         self.num_steps = num_steps
         self.batch_size = batch_size
@@ -93,7 +94,11 @@ class BaseAgent:
     def learn(self):
         raise NotImplementedError
 
-    def save_models(self):
+    def save_models(self, save_dir):
+        if not os.path.join(save_dir):
+            os.makedirs(save_dir)
+
+    def load_models(self, save_dir):
         raise NotImplementedError
 
     def update_target(self):
@@ -134,7 +139,7 @@ class BaseAgent:
                 self.writer.add_scalar(
                     'time/evaluation_time', e_time, 4 * self.steps)
                 t_time += e_time
-                self.save_models()
+                self.save_models(os.path.join(self.model_dir, 'final'))
 
             state = next_state
 
@@ -181,6 +186,10 @@ class BaseAgent:
                 break
 
         mean_return = total_return / num_episodes
+
+        if mean_return > self.best_eval_score:
+            self.best_eval_score = mean_return
+            self.save_models(os.path.join(self.model_dir, 'best'))
 
         # We log evaluation results along with training frames = 4 * steps.
         self.writer.add_scalar(
