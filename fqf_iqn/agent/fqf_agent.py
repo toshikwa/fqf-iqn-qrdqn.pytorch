@@ -6,14 +6,14 @@ from torch.optim import Adam, RMSprop
 from fqf_iqn.network import DQNBase, FractionProposalNetwork,\
     QuantileValueNetwork
 from fqf_iqn.utils import disable_gradients, update_params,\
-    calculate_quantile_huber_loss
+    calculate_quantile_huber_loss, LinearAnneaer
 from .base_agent import BaseAgent
 
 
 class FQFAgent(BaseAgent):
 
     def __init__(self, env, test_env, log_dir, num_steps=5*(10**7),
-                 batch_size=32, num_taus=32, num_cosines=64, ent_coef=0,
+                 batch_size=32, num_taus=32, num_cosines=64, ent_coef=1e-2,
                  kappa=1.0, quantile_lr=5e-5, fraction_lr=2.5e-9,
                  memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
@@ -62,7 +62,9 @@ class FQFAgent(BaseAgent):
 
         self.num_taus = num_taus
         self.num_cosines = num_cosines
-        self.ent_coef = ent_coef
+        self.ent_coef = LinearAnneaer(
+            start_value=ent_coef, end_value=0,
+            num_steps=(num_steps-start_steps)//update_interval)
         self.kappa = kappa
 
     def update_target(self):
@@ -101,6 +103,7 @@ class FQFAgent(BaseAgent):
 
     def learn(self):
         self.learning_steps += 1
+        self.ent_coef.step()
 
         if self.steps % self.target_update_interval == 0:
             self.update_target()
@@ -123,7 +126,7 @@ class FQFAgent(BaseAgent):
         # You can use entropy loss as a regularizer to prevent the distribution
         # from degenerating into a deterministic one, which happens rarely. We
         # don't use it by default.
-        entropy_loss = -self.ent_coef * entropies.mean()
+        entropy_loss = -self.ent_coef.get() * entropies.mean()
 
         update_params(
             self.fraction_optim, fraction_loss + entropy_loss,
