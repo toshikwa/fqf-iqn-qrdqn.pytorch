@@ -1,7 +1,6 @@
 import os
 import torch
 from torch.optim import Adam, RMSprop
-# from torch.optim.lr_scheduler import MultiStepLR
 
 from fqf_iqn.network import DQNBase, FractionProposalNetwork,\
     QuantileValueNetwork
@@ -46,25 +45,27 @@ class FQFAgent(BaseAgent):
         # Disable calculations of gradients of the target network.
         disable_gradients(self.target_net)
 
+        # NOTE: In the paper, learning rate of Fraction Proposal Net is
+        # swept between (0, 2.5e-5) and finally fixed at 2.5e-9. However,
+        # I don't sweep it for simplicity.
         self.quantile_optim = Adam(
             list(self.dqn_base.parameters())
             + list(self.quantile_net.parameters()),
-            lr=quantile_lr, eps=0.0003125)
+            lr=quantile_lr, eps=1e-2/batch_size)
         self.fraction_optim = RMSprop(
             self.fraction_net.parameters(),
             lr=fraction_lr, alpha=0.95, eps=0.00001)
 
-        # We sweap the learning rate of Fraction Proposal Network from
-        # 2.5e-5 to 2.5e-9 during training.
-        # self.lr_sweeper = MultiStepLR(
-        #     self.fraction_optim, gamma=0.1,
-        #     milestones=[10**4//4, 4*10**4//4, 10**6//4, 10**7//4])
-
-        self.num_taus = num_taus
-        self.num_cosines = num_cosines
+        # NOTE: The author said the training of Fraction Proposal Net is
+        # unstable and value distribution degenerates into a deterministic
+        # one rarely (e.g. 1 out of 20 seeds). So I use entropy of value
+        # distribution as a regularizer to stabilize (but possibly slow down)
+        # training. I linearly anneal the coefficient of entropy loss to 0.
         self.ent_coef = LinearAnneaer(
             start_value=ent_coef, end_value=0,
             num_steps=(num_steps-start_steps)//update_interval)
+        self.num_taus = num_taus
+        self.num_cosines = num_cosines
         self.kappa = kappa
 
     def update_target(self):
@@ -95,7 +96,7 @@ class FQFAgent(BaseAgent):
         assert quantiles.shape == (
             batch_size, self.num_taus, self.num_actions)
 
-        # Calculate expectations of values.
+        # Calculate expectations of value distribution.
         q = ((taus[:, 1:, None] - taus[:, :-1, None]) * quantiles).sum(dim=1)
         assert q.shape == (batch_size, self.num_actions)
 
@@ -111,7 +112,7 @@ class FQFAgent(BaseAgent):
         states, actions, rewards, next_states, dones =\
             self.memory.sample(self.batch_size)
 
-        # Calculate features of states.
+        # Calculate embeddings of current states.
         state_embeddings = self.dqn_base(states)
         # Calculate fractions and entropies.
         taus, hat_taus, entropies = self.fraction_net(state_embeddings)
@@ -123,9 +124,6 @@ class FQFAgent(BaseAgent):
             state_embeddings, taus, hat_taus, actions, rewards,
             next_states, dones)
 
-        # You can use entropy loss as a regularizer to prevent the distribution
-        # from degenerating into a deterministic one, which happens rarely. We
-        # don't use it by default.
         entropy_loss = -self.ent_coef.get() * entropies.mean()
 
         update_params(
@@ -136,8 +134,6 @@ class FQFAgent(BaseAgent):
             self.quantile_optim, quantile_loss + entropy_loss,
             networks=[self.dqn_base, self.quantile_net],
             retain_graph=False, grad_cliping=self.grad_cliping)
-
-        # self.lr_sweeper.step()
 
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
@@ -165,9 +161,12 @@ class FQFAgent(BaseAgent):
 
     def calculate_fraction_loss(self, state_embeddings, taus, hat_taus):
 
+        # Calculate \frac{\partial W_1}{\partial \tau} explicitly.
         gradient_of_taus = self.calculate_gradients_of_tau(
             state_embeddings, taus, hat_taus)
 
+        # Gradients of the network parameters and corresponding loss
+        # are calculated using chain rule.
         fraction_loss = (
             gradient_of_taus.mean(dim=2) * taus[:, 1:-1]).sum(dim=1).mean()
 
@@ -184,7 +183,7 @@ class FQFAgent(BaseAgent):
         action_index = actions[..., None].expand(
             self.batch_size, self.num_taus, 1)
 
-        # Calculate quantile values of current states and current actions.
+        # Get quantile values of current states and current actions.
         current_sa_quantiles = current_s_quantiles.gather(
             dim=2, index=action_index).view(self.batch_size, self.num_taus, 1)
 
@@ -192,7 +191,7 @@ class FQFAgent(BaseAgent):
             # Calculate features of next states.
             next_state_embeddings = self.dqn_base(next_states)
 
-            # Calculate fractions correspond to next states.
+            # Calculate fractions corresponding to next states.
             next_taus, next_hat_taus, _ =\
                 self.fraction_net(next_state_embeddings)
 
@@ -210,7 +209,7 @@ class FQFAgent(BaseAgent):
             next_action_index = next_actions.expand(
                 self.batch_size, self.num_taus, 1)
 
-            # Calculate quantile values of next states and next actions.
+            # Get quantile values of next states and next actions.
             next_sa_quantiles = next_s_quantiles.gather(
                 dim=2, index=next_action_index).view(-1, 1, self.num_taus)
 
@@ -220,18 +219,21 @@ class FQFAgent(BaseAgent):
             assert target_sa_quantiles.shape == (
                 self.batch_size, 1, self.num_taus)
 
-        # TD errors.
         td_errors = target_sa_quantiles - current_sa_quantiles
         assert td_errors.shape == (
             self.batch_size, self.num_taus, self.num_taus)
 
-        # Calculate quantile huber loss.
         quantile_huber_loss = calculate_quantile_huber_loss(
             td_errors, hat_taus, self.kappa)
 
         return quantile_huber_loss
 
     def calculate_gradients_of_tau(self, state_embeddings, taus, hat_taus):
+
+        # NOTE: Gradients of taus should be calculated at current state and
+        # any possible actions, however, calculating fractions of each state
+        # and action is quite heavy. So Fraction Proposal Net depends only on
+        # the state and fractions are shared across all actions.
 
         batch_size = state_embeddings.shape[0]
 

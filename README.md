@@ -9,7 +9,7 @@ You can install dependencies using `pip install -r requirements.txt`.
 You can train FQF agent using hyperparameters [here](https://github.com/ku2482/fqf.pytorch/blob/master/config/fqf.yaml).
 
 ```
-python train_fqf.py --cuda --env_id MsPacmanNoFrameskip-v4
+python train_fqf.py --cuda --env_id BreakoutNoFrameskip-v4 --seed 0
 ```
 
 ## References

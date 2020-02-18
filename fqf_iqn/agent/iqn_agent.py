@@ -152,7 +152,7 @@ class IQNAgent(BaseAgent):
                 self.calculate_q(next_state_embeddings), dim=1
                 ).view(self.batch_size, 1, 1)
 
-            # Repeat next actions into (batch_size, num_taus, 1).
+            # Repeat next actions into (batch_size, N_dash, 1).
             next_action_index = next_actions.expand(
                 self.batch_size, self.N_dash, 1)
 
@@ -166,11 +166,9 @@ class IQNAgent(BaseAgent):
             assert target_sa_quantiles.shape == (
                 self.batch_size, 1, self.N_dash)
 
-        # TD errors.
         td_errors = target_sa_quantiles - current_sa_quantiles
         assert td_errors.shape == (self.batch_size, self.N, self.N_dash)
 
-        # Calculate quantile huber loss.
         quantile_huber_loss = calculate_quantile_huber_loss(
             td_errors, taus, self.kappa)
 
