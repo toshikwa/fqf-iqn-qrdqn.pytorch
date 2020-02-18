@@ -12,7 +12,7 @@ from .base_agent import BaseAgent
 class FQFAgent(BaseAgent):
 
     def __init__(self, env, test_env, log_dir, num_steps=5*(10**7),
-                 batch_size=32, num_taus=32, num_cosines=64, ent_coef=1.0,
+                 batch_size=32, num_taus=32, num_cosines=64, ent_coef=0,
                  kappa=1.0, quantile_lr=5e-5, fraction_lr=2.5e-9,
                  memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
@@ -58,9 +58,9 @@ class FQFAgent(BaseAgent):
 
         # NOTE: The author said the training of Fraction Proposal Net is
         # unstable and value distribution degenerates into a deterministic
-        # one rarely (e.g. 1 out of 20 seeds). So I use entropy of value
+        # one rarely (e.g. 1 out of 20 seeds). So you can use entropy of value
         # distribution as a regularizer to stabilize (but possibly slow down)
-        # training. I linearly anneal the coefficient of entropy loss to 0.
+        # training.
         self.ent_coef = LinearAnneaer(
             start_value=ent_coef, end_value=0,
             num_steps=(num_steps-start_steps)//update_interval)
@@ -88,11 +88,14 @@ class FQFAgent(BaseAgent):
 
         return action
 
-    def calculate_q(self, state_embeddings, taus, hat_taus):
+    def calculate_q(self, state_embeddings, taus, hat_taus, target=False):
         batch_size = state_embeddings.shape[0]
 
         # Calculate quantiles of proposed fractions.
-        quantiles = self.quantile_net(state_embeddings, hat_taus)
+        if not target:
+            quantiles = self.quantile_net(state_embeddings, hat_taus)
+        else:
+            quantiles = self.target_net(state_embeddings, hat_taus)
         assert quantiles.shape == (
             batch_size, self.num_taus, self.num_actions)
 
@@ -201,8 +204,8 @@ class FQFAgent(BaseAgent):
 
             # Calculate next greedy actions.
             next_actions = torch.argmax(self.calculate_q(
-                next_state_embeddings, next_taus, next_hat_taus), dim=1
-                ).view(-1, 1, 1)
+                next_state_embeddings, next_taus, next_hat_taus, target=True),
+                dim=1).view(-1, 1, 1)
             assert next_actions.shape == (self.batch_size, 1, 1)
 
             # Repeat next actions into (batch_size, num_taus, 1).

@@ -65,7 +65,7 @@ class IQNAgent(BaseAgent):
                 state_embedding).argmax().item()
         return action
 
-    def calculate_q(self, state_embeddings):
+    def calculate_q(self, state_embeddings, target=False):
         batch_size = state_embeddings.shape[0]
 
         # Calculate random fractions.
@@ -74,7 +74,10 @@ class IQNAgent(BaseAgent):
             device=state_embeddings.device)
 
         # Calculate quantiles of random fractions.
-        quantiles = self.quantile_net(state_embeddings, taus)
+        if not target:
+            quantiles = self.quantile_net(state_embeddings, taus)
+        else:
+            quantiles = self.target_net(state_embeddings, taus)
         assert quantiles.shape == (batch_size, self.K, self.num_actions)
 
         # Calculate expectations of values.
@@ -149,7 +152,7 @@ class IQNAgent(BaseAgent):
 
             # Calculate next greedy actions.
             next_actions = torch.argmax(
-                self.calculate_q(next_state_embeddings), dim=1
+                self.calculate_q(next_state_embeddings, target=True), dim=1
                 ).view(self.batch_size, 1, 1)
 
             # Repeat next actions into (batch_size, N_dash, 1).
