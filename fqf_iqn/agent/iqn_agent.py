@@ -77,7 +77,8 @@ class IQNAgent(BaseAgent):
         if not target:
             quantiles = self.quantile_net(state_embeddings, taus)
         else:
-            quantiles = self.target_net(state_embeddings, taus)
+            with torch.no_grad():
+                quantiles = self.target_net(state_embeddings, taus)
         assert quantiles.shape == (batch_size, self.K, self.num_actions)
 
         # Calculate expectations of values.

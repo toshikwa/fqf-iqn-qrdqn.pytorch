@@ -95,7 +95,8 @@ class FQFAgent(BaseAgent):
         if not target:
             quantiles = self.quantile_net(state_embeddings, hat_taus)
         else:
-            quantiles = self.target_net(state_embeddings, hat_taus)
+            with torch.no_grad():
+                quantiles = self.target_net(state_embeddings, hat_taus)
         assert quantiles.shape == (
             batch_size, self.num_taus, self.num_actions)
 
