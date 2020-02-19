@@ -17,13 +17,15 @@ class FQFAgent(BaseAgent):
                  memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
-                 log_interval=50, eval_interval=250000, num_eval_steps=125000,
+                 epsilon_decay_steps=250000, double_dqn=False,
+                 log_interval=100, eval_interval=250000, num_eval_steps=125000,
                  grad_cliping=5.0, cuda=True, seed=0):
         super(FQFAgent, self).__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size,
             gamma, multi_step, update_interval, target_update_interval,
-            start_steps, epsilon_train, epsilon_eval, log_interval,
-            eval_interval, num_eval_steps, grad_cliping, cuda, seed)
+            start_steps, epsilon_train, epsilon_eval, epsilon_decay_steps,
+            double_dqn, log_interval, eval_interval, num_eval_steps,
+            grad_cliping, cuda, seed)
 
         # Feature extractor.
         self.dqn_base = DQNBase(
@@ -110,9 +112,6 @@ class FQFAgent(BaseAgent):
         self.learning_steps += 1
         self.ent_coef.step()
 
-        if self.steps % self.target_update_interval == 0:
-            self.update_target()
-
         states, actions, rewards, next_states, dones =\
             self.memory.sample(self.batch_size)
 
@@ -189,7 +188,9 @@ class FQFAgent(BaseAgent):
 
         # Get quantile values of current states and current actions.
         current_sa_quantiles = current_s_quantiles.gather(
-            dim=2, index=action_index).view(self.batch_size, self.num_taus, 1)
+            dim=2, index=action_index)
+        assert current_sa_quantiles.shape == (
+            self.batch_size, self.num_taus, 1)
 
         with torch.no_grad():
             # Calculate features of next states.
@@ -205,9 +206,8 @@ class FQFAgent(BaseAgent):
 
             # Calculate next greedy actions.
             next_actions = torch.argmax(self.calculate_q(
-                next_state_embeddings, next_taus, next_hat_taus, target=True),
-                dim=1).view(-1, 1, 1)
-            assert next_actions.shape == (self.batch_size, 1, 1)
+                next_state_embeddings, next_taus, next_hat_taus,
+                target=not self.double_dqn), dim=1).view(self.batch_size, 1, 1)
 
             # Repeat next actions into (batch_size, num_taus, 1).
             next_action_index = next_actions.expand(
@@ -215,7 +215,9 @@ class FQFAgent(BaseAgent):
 
             # Get quantile values of next states and next actions.
             next_sa_quantiles = next_s_quantiles.gather(
-                dim=2, index=next_action_index).view(-1, 1, self.num_taus)
+                dim=2, index=next_action_index).transpose(1, 2)
+            assert next_sa_quantiles.shape == (
+                self.batch_size, 1, self.num_taus)
 
             # Calculate target quantile values.
             target_sa_quantiles = rewards[..., None] + (
@@ -228,7 +230,7 @@ class FQFAgent(BaseAgent):
             self.batch_size, self.num_taus, self.num_taus)
 
         quantile_huber_loss = calculate_quantile_huber_loss(
-            td_errors, hat_taus, self.kappa)
+            td_errors, hat_taus.detach(), self.kappa)
 
         return quantile_huber_loss
 

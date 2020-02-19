@@ -15,13 +15,15 @@ class IQNAgent(BaseAgent):
                  kappa=1.0, lr=5e-5, memory_size=10**6, gamma=0.99,
                  multi_step=1, update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
-                 log_interval=50, eval_interval=250000, num_eval_steps=125000,
+                 epsilon_decay_steps=250000, double_dqn=False,
+                 log_interval=100, eval_interval=250000, num_eval_steps=125000,
                  grad_cliping=5.0, cuda=True, seed=0):
         super(IQNAgent, self).__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size,
             gamma, multi_step, update_interval, target_update_interval,
-            start_steps, epsilon_train, epsilon_eval, log_interval,
-            eval_interval, num_eval_steps, grad_cliping, cuda, seed)
+            start_steps, epsilon_train, epsilon_eval, epsilon_decay_steps,
+            double_dqn, log_interval, eval_interval, num_eval_steps,
+            grad_cliping, cuda, seed)
 
         # Feature extractor.
         self.dqn_base = DQNBase(
@@ -69,16 +71,16 @@ class IQNAgent(BaseAgent):
         batch_size = state_embeddings.shape[0]
 
         # Calculate random fractions.
-        taus = torch.rand(
+        tau_tildes = torch.rand(
             batch_size, self.K, dtype=state_embeddings.dtype,
             device=state_embeddings.device)
 
         # Calculate quantiles of random fractions.
         if not target:
-            quantiles = self.quantile_net(state_embeddings, taus)
+            quantiles = self.quantile_net(state_embeddings, tau_tildes)
         else:
             with torch.no_grad():
-                quantiles = self.target_net(state_embeddings, taus)
+                quantiles = self.target_net(state_embeddings, tau_tildes)
         assert quantiles.shape == (batch_size, self.K, self.num_actions)
 
         # Calculate expectations of values.
@@ -89,9 +91,6 @@ class IQNAgent(BaseAgent):
 
     def learn(self):
         self.learning_steps += 1
-
-        if self.steps % self.target_update_interval == 0:
-            self.update_target()
 
         states, actions, rewards, next_states, dones =\
             self.memory.sample(self.batch_size)
@@ -111,10 +110,12 @@ class IQNAgent(BaseAgent):
             self.writer.add_scalar(
                 'loss/quantile_loss', quantile_loss.detach().item(),
                 self.learning_steps)
+
             with torch.no_grad():
-                mean_q = self.calculate_q(state_embeddings).mean()
+                q = self.calculate_q(state_embeddings)
             self.writer.add_scalar(
-                'stats/mean_Q', mean_q, self.learning_steps)
+                'stats/mean_Q', q.mean().item(),
+                self.learning_steps)
             self.writer.add_scalar(
                 'time/mean_learning_time', self.learning_time.get(),
                 self.learning_steps)
@@ -136,11 +137,21 @@ class IQNAgent(BaseAgent):
 
         # Calculate quantile values of current states and current actions.
         current_sa_quantiles = current_s_quantiles.gather(
-            dim=2, index=action_index).view(self.batch_size, self.N, 1)
+            dim=2, index=action_index)
+        assert current_sa_quantiles.shape == (self.batch_size, self.N, 1)
 
         with torch.no_grad():
             # Calculate features of next states.
             next_state_embeddings = self.dqn_base(next_states)
+
+            # Calculate next greedy actions.
+            next_actions = torch.argmax(self.calculate_q(
+                next_state_embeddings, target=not self.double_dqn), dim=1
+                ).view(self.batch_size, 1, 1)
+
+            # Repeat next actions into (batch_size, N_dash, 1).
+            next_action_index = next_actions.expand(
+                self.batch_size, self.N_dash, 1)
 
             # Sample next fractions.
             tau_dashes = torch.rand(
@@ -151,18 +162,10 @@ class IQNAgent(BaseAgent):
             next_s_quantiles = self.target_net(
                 next_state_embeddings, tau_dashes)
 
-            # Calculate next greedy actions.
-            next_actions = torch.argmax(
-                self.calculate_q(next_state_embeddings, target=True), dim=1
-                ).view(self.batch_size, 1, 1)
-
-            # Repeat next actions into (batch_size, N_dash, 1).
-            next_action_index = next_actions.expand(
-                self.batch_size, self.N_dash, 1)
-
             # Calculate quantile values of next states and next actions.
             next_sa_quantiles = next_s_quantiles.gather(
-                dim=2, index=next_action_index).view(-1, 1, self.N_dash)
+                dim=2, index=next_action_index).transpose(1, 2)
+            assert next_sa_quantiles.shape == (self.batch_size, 1, self.N_dash)
 
             # Calculate target quantile values.
             target_sa_quantiles = rewards[..., None] + (

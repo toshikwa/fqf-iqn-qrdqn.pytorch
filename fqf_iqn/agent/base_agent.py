@@ -5,7 +5,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from fqf_iqn.memory import DummyMultiStepMemory
-from fqf_iqn.utils import RunningMeanStats
+from fqf_iqn.utils import RunningMeanStats, LinearAnneaer
 
 
 class BaseAgent:
@@ -14,7 +14,8 @@ class BaseAgent:
                  batch_size=32, memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
-                 log_interval=50, eval_interval=250000, num_eval_steps=125000,
+                 epsilon_decay_steps=250000, double_dqn=False,
+                 log_interval=100, eval_interval=250000, num_eval_steps=125000,
                  grad_cliping=5.0, cuda=True, seed=0):
 
         self.env = env
@@ -55,12 +56,15 @@ class BaseAgent:
         self.num_actions = self.env.action_space.n
         self.num_steps = num_steps
         self.batch_size = batch_size
+        self.double_dqn = double_dqn
+
         self.log_interval = log_interval
         self.eval_interval = eval_interval
         self.num_eval_steps = num_eval_steps
         self.gamma_n = gamma ** multi_step
         self.start_steps = start_steps
-        self.epsilon_train = epsilon_train
+        self.epsilon_train = LinearAnneaer(
+            1.0, epsilon_train, epsilon_decay_steps)
         self.epsilon_eval = epsilon_eval
         self.update_interval = update_interval
         self.target_update_interval = target_update_interval
@@ -81,7 +85,7 @@ class BaseAgent:
             return np.random.rand() < self.epsilon_eval
         else:
             return self.steps < self.start_steps\
-                or np.random.rand() < self.epsilon_train
+                or np.random.rand() < self.epsilon_train.get()
 
     def explore(self):
         # Act with randomness.
@@ -122,9 +126,13 @@ class BaseAgent:
             self.steps += 1
             episode_steps += 1
             episode_return += reward
+            self.epsilon_train.step()
 
             self.memory.append(
                 state, action, reward, next_state, done)
+
+            if self.steps % self.target_update_interval == 0:
+                self.update_target()
 
             if self.is_update():
                 l_time = time()
