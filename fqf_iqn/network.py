@@ -186,8 +186,7 @@ class QuantileValueNetwork(nn.Module):
         else:
             advantages = self.quantile_advantage_net(embeddings)
             baselines = self.quantile_baseline_net(embeddings)
-            return baselines + advantages\
-                - advantages.detach().mean(1, keepdim=True)
+            return baselines + advantages - advantages.mean(1, keepdim=True)
 
 
 class NoisyLinear(nn.Module):
