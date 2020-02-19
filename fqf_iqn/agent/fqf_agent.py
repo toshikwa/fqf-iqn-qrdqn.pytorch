@@ -30,7 +30,7 @@ class FQFAgent(BaseAgent):
             cuda, seed)
 
         # Feature extractor.
-        self.dqn_base = DQNBase(
+        self.dqn_net = DQNBase(
             num_channels=env.observation_space.shape[0]).to(self.device)
         # Fraction Proposal Network.
         self.fraction_net = FractionProposalNetwork(
@@ -40,8 +40,11 @@ class FQFAgent(BaseAgent):
             num_actions=self.num_actions, num_cosines=num_cosines,
             dueling_net=dueling_net, noisy_net=noisy_net
             ).to(self.device)
+
         # Target Network.
-        self.target_net = QuantileValueNetwork(
+        self.target_dqn_net = DQNBase(
+            num_channels=env.observation_space.shape[0]).to(self.device)
+        self.target_quantile_net = QuantileValueNetwork(
             num_actions=self.num_actions, num_cosines=num_cosines,
             dueling_net=dueling_net, noisy_net=noisy_net
             ).to(self.device)
@@ -49,13 +52,14 @@ class FQFAgent(BaseAgent):
         # Copy parameters of the learning network to the target network.
         self.update_target()
         # Disable calculations of gradients of the target network.
-        disable_gradients(self.target_net)
+        disable_gradients(self.target_dqn_net)
+        disable_gradients(self.target_quantile_net)
 
         # NOTE: In the paper, learning rate of Fraction Proposal Net is
         # swept between (0, 2.5e-5) and finally fixed at 2.5e-9. However,
         # I don't sweep it for simplicity.
         self.quantile_optim = Adam(
-            list(self.dqn_base.parameters())
+            list(self.dqn_net.parameters())
             + list(self.quantile_net.parameters()),
             lr=quantile_lr, eps=1e-2/batch_size)
         self.fraction_optim = RMSprop(
@@ -81,7 +85,7 @@ class FQFAgent(BaseAgent):
 
         with torch.no_grad():
             # Calculate state embeddings.
-            state_embedding = self.dqn_base(state)
+            state_embedding = self.dqn_net(state)
             # Calculate proposals of fractions.
             tau, hat_tau, _ = self.fraction_net(state_embedding)
             # Calculate Q and get greedy action.
@@ -98,7 +102,8 @@ class FQFAgent(BaseAgent):
             quantiles = self.quantile_net(state_embeddings, hat_taus)
         else:
             with torch.no_grad():
-                quantiles = self.target_net(state_embeddings, hat_taus)
+                quantiles = self.target_quantile_net(
+                    state_embeddings, hat_taus)
         assert quantiles.shape == (
             batch_size, self.num_taus, self.num_actions)
 
@@ -116,7 +121,7 @@ class FQFAgent(BaseAgent):
             self.memory.sample(self.batch_size)
 
         # Calculate embeddings of current states.
-        state_embeddings = self.dqn_base(states)
+        state_embeddings = self.dqn_net(states)
         # Calculate fractions and entropies.
         taus, hat_taus, entropies = self.fraction_net(state_embeddings)
 
@@ -135,7 +140,7 @@ class FQFAgent(BaseAgent):
             grad_cliping=self.grad_cliping)
         update_params(
             self.quantile_optim, quantile_loss + entropy_loss,
-            networks=[self.dqn_base, self.quantile_net],
+            networks=[self.dqn_net, self.quantile_net],
             retain_graph=False, grad_cliping=self.grad_cliping)
 
         if self.learning_steps % self.log_interval == 0:
@@ -193,16 +198,15 @@ class FQFAgent(BaseAgent):
             self.batch_size, self.num_taus, 1)
 
         with torch.no_grad():
-            # Calculate features of next states.
-            next_state_embeddings = self.dqn_base(next_states)
+            # Calculate next greedy actions.
+            if not self.double_q_learning:
+                next_state_embeddings = self.target_dqn_net(next_states)
+            else:
+                next_state_embeddings = self.dqn_net(next_states)
 
             # Calculate fractions corresponding to next states.
             next_taus, next_hat_taus, _ =\
                 self.fraction_net(next_state_embeddings)
-
-            # Calculate quantile values of next states and all actions.
-            next_s_quantiles = self.target_net(
-                next_state_embeddings, next_hat_taus)
 
             # Calculate next greedy actions.
             next_actions = torch.argmax(self.calculate_q(
@@ -213,6 +217,14 @@ class FQFAgent(BaseAgent):
             # Repeat next actions into (batch_size, num_taus, 1).
             next_action_index = next_actions.expand(
                 self.batch_size, self.num_taus, 1)
+
+            # Calculate features of next states.
+            if not self.double_q_learning:
+                next_state_embeddings = self.dqn_net(next_states)
+
+            # Calculate quantile values of next states and all actions.
+            next_s_quantiles = self.target_quantile_net(
+                next_state_embeddings, next_hat_taus)
 
             # Get quantile values of next states and next actions.
             next_sa_quantiles = next_s_quantiles.gather(
@@ -270,8 +282,8 @@ class FQFAgent(BaseAgent):
             os.makedirs(save_dir)
 
         torch.save(
-            self.dqn_base.state_dict(),
-            os.path.join(save_dir, 'dqn_base.pth'))
+            self.dqn_net.state_dict(),
+            os.path.join(self.model_dir, 'dqn_net.pth'))
         torch.save(
             self.fraction_net.state_dict(),
             os.path.join(save_dir, 'fraction_net.pth'))
@@ -279,15 +291,20 @@ class FQFAgent(BaseAgent):
             self.quantile_net.state_dict(),
             os.path.join(save_dir, 'quantile_net.pth'))
         torch.save(
-            self.target_net.state_dict(),
-            os.path.join(save_dir, 'target_net.pth'))
+            self.target_dqn_net.state_dict(),
+            os.path.join(self.model_dir, 'target_dqn_net.pth'))
+        torch.save(
+            self.target_quantile_net.state_dict(),
+            os.path.join(self.model_dir, 'target_quantile_net.pth'))
 
     def load_models(self, save_dir):
-        self.dqn_base.load_state_dict(torch.load(
-            os.path.join(save_dir, 'dqn_base.pth')))
+        self.dqn_net.load_state_dict(torch.load(
+            os.path.join(save_dir, 'dqn_net.pth')))
         self.fraction_net.load_state_dict(torch.load(
             os.path.join(save_dir, 'fraction_net.pth')))
         self.quantile_net.load_state_dict(torch.load(
             os.path.join(save_dir, 'quantile_net.pth')))
-        self.target_net.load_state_dict(torch.load(
-            os.path.join(save_dir, 'target_net.pth')))
+        self.target_dqn_net.load_state_dict(torch.load(
+            os.path.join(save_dir, 'target_dqn_net.pth')))
+        self.target_quantile_net.load_state_dict(torch.load(
+            os.path.join(save_dir, 'target_quantile_net.pth')))

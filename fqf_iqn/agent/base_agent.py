@@ -32,8 +32,10 @@ class BaseAgent:
         self.device = torch.device(
             "cuda" if cuda and torch.cuda.is_available() else "cpu")
 
+        self.dqn_net = None
+        self.target_dqn_net = None
         self.quantile_net = None
-        self.target_net = None
+        self.target_quantile_net = None
 
         # Replay memory which is memory-efficient to store stacked frames.
         self.memory = DummyMultiStepMemory(
@@ -96,8 +98,10 @@ class BaseAgent:
                 or np.random.rand() < self.epsilon_train.get()
 
     def update_target(self):
-        self.target_net.load_state_dict(
+        self.target_quantile_net.load_state_dict(
             self.quantile_net.state_dict())
+        self.target_dqn_net.load_state_dict(
+            self.dqn_net.state_dict())
 
     def explore(self):
         # Act with randomness.
@@ -118,7 +122,7 @@ class BaseAgent:
 
     def train_episode(self):
         self.quantile_net.train()
-        self.target_net.train()
+        self.target_quantile_net.train()
 
         self.episodes += 1
         episode_return = 0.
