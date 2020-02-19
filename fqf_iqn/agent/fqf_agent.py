@@ -17,15 +17,17 @@ class FQFAgent(BaseAgent):
                  memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
-                 epsilon_decay_steps=250000, double_dqn=False,
+                 epsilon_decay_steps=250000, double_q_learning=False,
+                 dueling_net=False, noisy_net=False,
                  log_interval=100, eval_interval=250000, num_eval_steps=125000,
                  max_episode_steps=27000, grad_cliping=5.0, cuda=True, seed=0):
         super(FQFAgent, self).__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size,
             gamma, multi_step, update_interval, target_update_interval,
             start_steps, epsilon_train, epsilon_eval, epsilon_decay_steps,
-            double_dqn, log_interval, eval_interval, num_eval_steps,
-            max_episode_steps, grad_cliping, cuda, seed)
+            double_q_learning, dueling_net, noisy_net, log_interval,
+            eval_interval, num_eval_steps, max_episode_steps, grad_cliping,
+            cuda, seed)
 
         # Feature extractor.
         self.dqn_base = DQNBase(
@@ -35,12 +37,14 @@ class FQFAgent(BaseAgent):
             num_taus=num_taus).to(self.device)
         # Quantile Value Network.
         self.quantile_net = QuantileValueNetwork(
-            num_actions=self.num_actions, num_cosines=num_cosines
+            num_actions=self.num_actions, num_cosines=num_cosines,
+            dueling_net=dueling_net, noisy_net=noisy_net
             ).to(self.device)
         # Target Network.
         self.target_net = QuantileValueNetwork(
-            num_actions=self.num_actions, num_cosines=num_cosines
-            ).eval().to(self.device)
+            num_actions=self.num_actions, num_cosines=num_cosines,
+            dueling_net=dueling_net, noisy_net=noisy_net
+            ).to(self.device)
 
         # Copy parameters of the learning network to the target network.
         self.update_target()
@@ -69,10 +73,6 @@ class FQFAgent(BaseAgent):
         self.num_taus = num_taus
         self.num_cosines = num_cosines
         self.kappa = kappa
-
-    def update_target(self):
-        self.target_net.load_state_dict(
-            self.quantile_net.state_dict())
 
     def exploit(self, state):
         # Act without randomness.
@@ -207,7 +207,8 @@ class FQFAgent(BaseAgent):
             # Calculate next greedy actions.
             next_actions = torch.argmax(self.calculate_q(
                 next_state_embeddings, next_taus, next_hat_taus,
-                target=not self.double_dqn), dim=1).view(self.batch_size, 1, 1)
+                target=not self.double_q_learning
+                ), dim=1).view(self.batch_size, 1, 1)
 
             # Repeat next actions into (batch_size, num_taus, 1).
             next_action_index = next_actions.expand(

@@ -14,7 +14,8 @@ class BaseAgent:
                  batch_size=32, memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
-                 epsilon_decay_steps=250000, double_dqn=False,
+                 epsilon_decay_steps=250000, double_q_learning=False,
+                 dueling_net=False, noisy_net=False,
                  log_interval=100, eval_interval=250000, num_eval_steps=125000,
                  max_episode_steps=27000, grad_cliping=5.0, cuda=True, seed=0):
 
@@ -30,6 +31,9 @@ class BaseAgent:
 
         self.device = torch.device(
             "cuda" if cuda and torch.cuda.is_available() else "cpu")
+
+        self.quantile_net = None
+        self.target_net = None
 
         # Replay memory which is memory-efficient to store stacked frames.
         self.memory = DummyMultiStepMemory(
@@ -56,7 +60,10 @@ class BaseAgent:
         self.num_actions = self.env.action_space.n
         self.num_steps = num_steps
         self.batch_size = batch_size
-        self.double_dqn = double_dqn
+
+        self.double_q_learning = double_q_learning
+        self.dueling_net = dueling_net
+        self.noisy_net = noisy_net
 
         self.log_interval = log_interval
         self.eval_interval = eval_interval
@@ -88,6 +95,10 @@ class BaseAgent:
             return self.steps < self.start_steps\
                 or np.random.rand() < self.epsilon_train.get()
 
+    def update_target(self):
+        self.target_net.load_state_dict(
+            self.quantile_net.state_dict())
+
     def explore(self):
         # Act with randomness.
         action = self.env.action_space.sample()
@@ -105,10 +116,10 @@ class BaseAgent:
     def load_models(self, save_dir):
         raise NotImplementedError
 
-    def update_target(self):
-        raise NotImplementedError
-
     def train_episode(self):
+        self.quantile_net.train()
+        self.target_net.train()
+
         self.episodes += 1
         episode_return = 0.
         episode_steps = 0
@@ -118,6 +129,11 @@ class BaseAgent:
         state = self.env.reset()
 
         while (not done) and episode_steps <= self.max_episode_steps:
+
+            if self.steps % self.update_interval == 0:
+                # Reset the noise of noisy net (online net only).
+                self.quantile_net.reset_noise()
+
             if self.is_greedy(eval=False):
                 action = self.explore()
             else:
@@ -162,15 +178,14 @@ class BaseAgent:
             self.writer.add_scalar(
                 'time/mean_training_time', self.training_time.get(),
                 4 * self.steps)
-            self.writer.add_scalar(
-                'stats/epsilon_train', self.epsilon_train.get(),
-                4 * self.steps)
 
         print(f'Episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '
               f'return: {episode_return:<5.1f}')
 
     def evaluate(self):
+        self.quantile_net.eval()
+
         num_episodes = 0
         num_steps = 0
         total_return = 0.0
