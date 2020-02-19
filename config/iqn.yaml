@@ -19,4 +19,5 @@ double_dqn: False
 log_interval: 100
 eval_interval: 250000
 num_eval_steps: 125000  # It equals to 500k frames.
+max_episode_steps: 27000
 grad_cliping: 5.0

@@ -16,7 +16,7 @@ class BaseAgent:
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
                  epsilon_decay_steps=250000, double_dqn=False,
                  log_interval=100, eval_interval=250000, num_eval_steps=125000,
-                 grad_cliping=5.0, cuda=True, seed=0):
+                 max_episode_steps=27000, grad_cliping=5.0, cuda=True, seed=0):
 
         self.env = env
         self.test_env = test_env
@@ -68,6 +68,7 @@ class BaseAgent:
         self.epsilon_eval = epsilon_eval
         self.update_interval = update_interval
         self.target_update_interval = target_update_interval
+        self.max_episode_steps = max_episode_steps
         self.grad_cliping = grad_cliping
 
     def run(self):
@@ -116,7 +117,7 @@ class BaseAgent:
         done = False
         state = self.env.reset()
 
-        while not done:
+        while (not done) and episode_steps <= self.max_episode_steps:
             if self.is_greedy(eval=False):
                 action = self.explore()
             else:
@@ -161,6 +162,9 @@ class BaseAgent:
             self.writer.add_scalar(
                 'time/mean_training_time', self.training_time.get(),
                 4 * self.steps)
+            self.writer.add_scalar(
+                'stats/epsilon_train', self.epsilon_train.get(),
+                4 * self.steps)
 
         print(f'Episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '
@@ -173,9 +177,10 @@ class BaseAgent:
 
         while True:
             state = self.test_env.reset()
+            episode_steps = 0
             episode_return = 0.0
             done = False
-            while not done:
+            while (not done) and episode_steps <= self.max_episode_steps:
                 if self.is_greedy(eval=True):
                     action = self.explore()
                 else:
@@ -183,6 +188,7 @@ class BaseAgent:
 
                 next_state, reward, done, _ = self.test_env.step(action)
                 num_steps += 1
+                episode_steps += 1
                 episode_return += reward
                 state = next_state
                 if done:

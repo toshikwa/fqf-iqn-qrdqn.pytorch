@@ -17,13 +17,13 @@ class IQNAgent(BaseAgent):
                  start_steps=50000, epsilon_train=0.01, epsilon_eval=0.001,
                  epsilon_decay_steps=250000, double_dqn=False,
                  log_interval=100, eval_interval=250000, num_eval_steps=125000,
-                 grad_cliping=5.0, cuda=True, seed=0):
+                 max_episode_steps=27000, grad_cliping=5.0, cuda=True, seed=0):
         super(IQNAgent, self).__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size,
             gamma, multi_step, update_interval, target_update_interval,
             start_steps, epsilon_train, epsilon_eval, epsilon_decay_steps,
             double_dqn, log_interval, eval_interval, num_eval_steps,
-            grad_cliping, cuda, seed)
+            max_episode_steps, grad_cliping, cuda, seed)
 
         # Feature extractor.
         self.dqn_base = DQNBase(
