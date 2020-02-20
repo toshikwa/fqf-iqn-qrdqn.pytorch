@@ -50,6 +50,7 @@ class FQFAgent(BaseAgent):
         # I don't sweep it for simplicity.
         self.quantile_optim = Adam(
             list(self.online_net.dqn_net.parameters())
+            + list(self.online_net.cosine_net.parameters())
             + list(self.online_net.quantile_net.parameters()),
             lr=quantile_lr, eps=1e-2/batch_size)
         self.fraction_optim = RMSprop(
@@ -108,7 +109,9 @@ class FQFAgent(BaseAgent):
             grad_cliping=self.grad_cliping)
         update_params(
             self.quantile_optim, quantile_loss + entropy_loss,
-            networks=[self.online_net.dqn_net, self.online_net.quantile_net],
+            networks=[
+                self.online_net.dqn_net, self.online_net.cosine_net,
+                self.online_net.quantile_net],
             retain_graph=False, grad_cliping=self.grad_cliping)
 
         if self.learning_steps % self.log_interval == 0:
