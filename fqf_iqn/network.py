@@ -81,86 +81,30 @@ class FractionProposalNetwork(nn.Module):
         assert taus.shape == (batch_size, self.num_taus+1)
 
         # Calculate \hat \tau_i (i=0,...,N-1).
-        hat_taus = (taus[:, :-1] + taus[:, 1:]) / 2.
-        assert hat_taus.shape == (batch_size, self.num_taus)
+        tau_hats = (taus[:, :-1] + taus[:, 1:]) / 2.
+        assert tau_hats.shape == (batch_size, self.num_taus)
 
         # Calculate entropies of value distributions.
         entropies = -(log_probs * probs).sum(dim=-1, keepdim=True)
         assert entropies.shape == (batch_size, 1)
 
-        return taus, hat_taus, entropies
+        return taus, tau_hats, entropies
 
 
-class QuantileValueNetwork(nn.Module):
+class CosineEmbeddingNetwork(nn.Module):
 
-    def __init__(self, num_actions, num_cosines=64, embedding_dim=7*7*64,
-                 dueling_net=False, noisy_net=False):
-        super(QuantileValueNetwork, self).__init__()
-
+    def __init__(self, num_cosines=64, embedding_dim=7*7*64, noisy_net=False):
+        super(CosineEmbeddingNetwork, self).__init__()
         linear = NoisyLinear if noisy_net else nn.Linear
 
-        self.embeding_net = nn.Sequential(
+        self.net = nn.Sequential(
             linear(num_cosines, embedding_dim),
             nn.ReLU()
         )
-
-        if not dueling_net:
-            self.quantile_net = nn.Sequential(
-                linear(embedding_dim, 512),
-                nn.ReLU(),
-                linear(512, num_actions),
-            )
-        else:
-            self.quantile_advantage_net = nn.Sequential(
-                linear(embedding_dim, 512),
-                nn.ReLU(),
-                linear(512, num_actions),
-            )
-            self.quantile_baseline_net = nn.Sequential(
-                linear(embedding_dim, 512),
-                nn.ReLU(),
-                linear(512, 1),
-            )
-
-        self.num_actions = num_actions
         self.num_cosines = num_cosines
         self.embedding_dim = embedding_dim
-        self.dueling_net = dueling_net
-        self.noisy_net = noisy_net
 
-    def reset_noise(self):
-        if self.noisy_net:
-            for m in self.modules():
-                if isinstance(m, NoisyLinear):
-                    m.reset_noise()
-
-    def forward(self, state_embeddings, taus):
-        assert state_embeddings.shape[1] == self.embedding_dim
-        assert state_embeddings.shape[0] == taus.shape[0]
-
-        # NOTE: Because variable taus correspond to either \tau or \hat \tau
-        # in the paper, num_taus isn't neccesarily the same as fqf.num_taus.
-        batch_size = taus.shape[0]
-        num_taus = taus.shape[1]
-
-        # Reshape into (batch_size, 1, embedding_dim).
-        state_embeddings = state_embeddings.view(
-            batch_size, 1, self.embedding_dim)
-
-        # Calculate embeddings of taus.
-        tau_embeddings = self.calculate_embedding_of_taus(taus)
-
-        # Calculate embeddings of states and taus.
-        embeddings = (state_embeddings * tau_embeddings).view(
-            batch_size * num_taus, self.embedding_dim)
-
-        # Calculate quantile values.
-        quantile_values = self.calculate_quantile_values(
-            embeddings).view(batch_size, num_taus, self.num_actions)
-
-        return quantile_values
-
-    def calculate_embedding_of_taus(self, taus):
+    def forward(self, taus):
         batch_size = taus.shape[0]
         num_taus = taus.shape[1]
 
@@ -175,18 +119,69 @@ class QuantileValueNetwork(nn.Module):
             ).view(batch_size * num_taus, self.num_cosines)
 
         # Calculate embeddings of taus.
-        tau_embeddings = self.embeding_net(cosines).view(
+        tau_embeddings = self.net(cosines).view(
             batch_size, num_taus, self.embedding_dim)
 
         return tau_embeddings
 
-    def calculate_quantile_values(self, embeddings):
-        if not self.dueling_net:
-            return self.quantile_net(embeddings)
+
+class QuantileNetwork(nn.Module):
+
+    def __init__(self, num_actions, embedding_dim=7*7*64, dueling_net=False,
+                 noisy_net=False):
+        super(QuantileNetwork, self).__init__()
+        linear = NoisyLinear if noisy_net else nn.Linear
+
+        if not dueling_net:
+            self.net = nn.Sequential(
+                linear(embedding_dim, 512),
+                nn.ReLU(),
+                linear(512, num_actions),
+            )
         else:
-            advantages = self.quantile_advantage_net(embeddings)
-            baselines = self.quantile_baseline_net(embeddings)
-            return baselines + advantages - advantages.mean(1, keepdim=True)
+            self.advantage_net = nn.Sequential(
+                linear(embedding_dim, 512),
+                nn.ReLU(),
+                linear(512, num_actions),
+            )
+            self.baseline_net = nn.Sequential(
+                linear(embedding_dim, 512),
+                nn.ReLU(),
+                linear(512, 1),
+            )
+
+        self.num_actions = num_actions
+        self.embedding_dim = embedding_dim
+        self.dueling_net = dueling_net
+        self.noisy_net = noisy_net
+
+    def forward(self, state_embeddings, tau_embeddings):
+        assert state_embeddings.shape[0] == tau_embeddings.shape[0]
+        assert state_embeddings.shape[1] == tau_embeddings.shape[2]
+
+        # NOTE: Because variable taus correspond to either \tau or \hat \tau
+        # in the paper, num_taus isn't neccesarily the same as fqf.num_taus.
+        batch_size = state_embeddings.shape[0]
+        num_taus = tau_embeddings.shape[1]
+
+        # Reshape into (batch_size, 1, embedding_dim).
+        state_embeddings = state_embeddings.view(
+            batch_size, 1, self.embedding_dim)
+
+        # Calculate embeddings of states and taus.
+        embeddings = (state_embeddings * tau_embeddings).view(
+            batch_size * num_taus, self.embedding_dim)
+
+        # Calculate quantile values.
+        if not self.dueling_net:
+            quantiles = self.net(embeddings)
+        else:
+            advantages = self.advantage_net(embeddings)
+            baselines = self.baseline_net(embeddings)
+            quantiles =\
+                baselines + advantages - advantages.mean(1, keepdim=True)
+
+        return quantiles.view(batch_size, num_taus, self.num_actions)
 
 
 class NoisyLinear(nn.Module):

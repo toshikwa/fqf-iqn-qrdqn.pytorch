@@ -1,11 +1,9 @@
-import os
 import torch
 from torch.optim import Adam, RMSprop
 
-from fqf_iqn.network import DQNBase, FractionProposalNetwork,\
-    QuantileValueNetwork
+from fqf_iqn.model import FQF
 from fqf_iqn.utils import disable_gradients, update_params,\
-    calculate_quantile_huber_loss, LinearAnneaer
+    calculate_quantile_huber_loss, evaluate_quantile_at_action, LinearAnneaer
 from .base_agent import BaseAgent
 
 
@@ -29,41 +27,33 @@ class FQFAgent(BaseAgent):
             eval_interval, num_eval_steps, max_episode_steps, grad_cliping,
             cuda, seed)
 
-        # Feature extractor.
-        self.dqn_net = DQNBase(
-            num_channels=env.observation_space.shape[0]).to(self.device)
-        # Fraction Proposal Network.
-        self.fraction_net = FractionProposalNetwork(
-            num_taus=num_taus).to(self.device)
-        # Quantile Value Network.
-        self.quantile_net = QuantileValueNetwork(
-            num_actions=self.num_actions, num_cosines=num_cosines,
-            dueling_net=dueling_net, noisy_net=noisy_net
-            ).to(self.device)
-
-        # Target Network.
-        self.target_dqn_net = DQNBase(
-            num_channels=env.observation_space.shape[0]).to(self.device)
-        self.target_quantile_net = QuantileValueNetwork(
-            num_actions=self.num_actions, num_cosines=num_cosines,
-            dueling_net=dueling_net, noisy_net=noisy_net
-            ).to(self.device)
+        # Online network.
+        self.online_net = FQF(
+            num_channels=env.observation_space.shape[0],
+            num_actions=self.num_actions, num_taus=num_taus,
+            num_cosines=num_cosines, dueling_net=dueling_net,
+            noisy_net=noisy_net).to(self.device)
+        # Target network.
+        self.target_net = FQF(
+            num_channels=env.observation_space.shape[0],
+            num_actions=self.num_actions, num_taus=num_taus,
+            num_cosines=num_cosines, dueling_net=dueling_net,
+            noisy_net=noisy_net).to(self.device)
 
         # Copy parameters of the learning network to the target network.
         self.update_target()
         # Disable calculations of gradients of the target network.
-        disable_gradients(self.target_dqn_net)
-        disable_gradients(self.target_quantile_net)
+        disable_gradients(self.target_net)
 
         # NOTE: In the paper, learning rate of Fraction Proposal Net is
         # swept between (0, 2.5e-5) and finally fixed at 2.5e-9. However,
         # I don't sweep it for simplicity.
         self.quantile_optim = Adam(
-            list(self.dqn_net.parameters())
-            + list(self.quantile_net.parameters()),
+            list(self.online_net.dqn_net.parameters())
+            + list(self.online_net.quantile_net.parameters()),
             lr=quantile_lr, eps=1e-2/batch_size)
         self.fraction_optim = RMSprop(
-            self.fraction_net.parameters(),
+            self.online_net.fraction_net.parameters(),
             lr=fraction_lr, alpha=0.95, eps=0.00001)
 
         # NOTE: The author said the training of Fraction Proposal Net is
@@ -84,34 +74,10 @@ class FQFAgent(BaseAgent):
             state).unsqueeze(0).to(self.device).float() / 255.
 
         with torch.no_grad():
-            # Calculate state embeddings.
-            state_embedding = self.dqn_net(state)
-            # Calculate proposals of fractions.
-            tau, hat_tau, _ = self.fraction_net(state_embedding)
             # Calculate Q and get greedy action.
-            action = self.calculate_q(
-                state_embedding, tau, hat_tau).argmax().item()
+            action = self.online_net.calculate_q(states=state).argmax().item()
 
         return action
-
-    def calculate_q(self, state_embeddings, taus, hat_taus, target=False):
-        batch_size = state_embeddings.shape[0]
-
-        # Calculate quantiles of proposed fractions.
-        if not target:
-            quantiles = self.quantile_net(state_embeddings, hat_taus)
-        else:
-            with torch.no_grad():
-                quantiles = self.target_quantile_net(
-                    state_embeddings, hat_taus)
-        assert quantiles.shape == (
-            batch_size, self.num_taus, self.num_actions)
-
-        # Calculate expectations of value distribution.
-        q = ((taus[:, 1:, None] - taus[:, :-1, None]) * quantiles).sum(dim=1)
-        assert q.shape == (batch_size, self.num_actions)
-
-        return q
 
     def learn(self):
         self.learning_steps += 1
@@ -121,26 +87,28 @@ class FQFAgent(BaseAgent):
             self.memory.sample(self.batch_size)
 
         # Calculate embeddings of current states.
-        state_embeddings = self.dqn_net(states)
+        state_embeddings = self.online_net.calculate_state_embeddings(states)
         # Calculate fractions and entropies.
-        taus, hat_taus, entropies = self.fraction_net(state_embeddings)
+        taus, tau_hats, entropies =\
+            self.online_net.calculate_fractions(
+                state_embeddings=state_embeddings)
 
         fraction_loss = self.calculate_fraction_loss(
-            state_embeddings, taus, hat_taus)
+            state_embeddings, taus, tau_hats)
 
         quantile_loss = self.calculate_quantile_loss(
-            state_embeddings, taus, hat_taus, actions, rewards,
+            state_embeddings, taus, tau_hats, actions, rewards,
             next_states, dones)
 
         entropy_loss = -self.ent_coef.get() * entropies.mean()
 
         update_params(
             self.fraction_optim, fraction_loss + entropy_loss,
-            networks=[self.fraction_net], retain_graph=True,
+            networks=[self.online_net.fraction_net], retain_graph=True,
             grad_cliping=self.grad_cliping)
         update_params(
             self.quantile_optim, quantile_loss + entropy_loss,
-            networks=[self.dqn_net, self.quantile_net],
+            networks=[self.online_net.dqn_net, self.online_net.quantile_net],
             retain_graph=False, grad_cliping=self.grad_cliping)
 
         if self.learning_steps % self.log_interval == 0:
@@ -155,8 +123,8 @@ class FQFAgent(BaseAgent):
                 self.learning_steps)
 
             with torch.no_grad():
-                mean_q = self.calculate_q(
-                    state_embeddings, taus, hat_taus).mean()
+                mean_q = self.online_net.calculate_q(
+                    taus, tau_hats, state_embeddings=state_embeddings).mean()
 
             self.writer.add_scalar(
                 'stats/mean_Q', mean_q, self.learning_steps)
@@ -167,11 +135,33 @@ class FQFAgent(BaseAgent):
                 'time/mean_learning_time', self.learning_time.get(),
                 self.learning_steps)
 
-    def calculate_fraction_loss(self, state_embeddings, taus, hat_taus):
+    def calculate_fraction_loss(self, state_embeddings, taus, tau_hats):
 
-        # Calculate \frac{\partial W_1}{\partial \tau} explicitly.
-        gradient_of_taus = self.calculate_gradients_of_tau(
-            state_embeddings, taus, hat_taus)
+        # NOTE: Gradients of taus should be calculated at current state and
+        # any possible actions, however, calculating fractions of each state
+        # and action is quite heavy. So Fraction Proposal Net depends only on
+        # the state and fractions are shared across all actions.
+
+        batch_size = state_embeddings.shape[0]
+
+        with torch.no_grad():
+            quantile_tau_i = self.online_net.calculate_quantiles(
+                taus=taus[:, 1:-1], state_embeddings=state_embeddings)
+            assert quantile_tau_i.shape == (
+                batch_size, self.num_taus-1, self.num_actions)
+
+            quantile_hat_tau_i = self.online_net.calculate_quantiles(
+                taus=tau_hats[:, 1:], state_embeddings=state_embeddings)
+            assert quantile_hat_tau_i.shape == (
+                batch_size, self.num_taus-1, self.num_actions)
+
+            quantile_hat_tau_i_minus_1 = self.online_net.calculate_quantiles(
+                taus=tau_hats[:, :-1], state_embeddings=state_embeddings)
+            assert quantile_hat_tau_i_minus_1.shape == (
+                batch_size, self.num_taus-1, self.num_actions)
+
+        gradient_of_taus =\
+            2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
 
         # Gradients of the network parameters and corresponding loss
         # are calculated using chain rule.
@@ -180,55 +170,52 @@ class FQFAgent(BaseAgent):
 
         return fraction_loss
 
-    def calculate_quantile_loss(self, state_embeddings, taus, hat_taus,
+    def calculate_quantile_loss(self, state_embeddings, taus, tau_hats,
                                 actions, rewards, next_states, dones):
 
         # Calculate quantile values of current states and all actions.
-        current_s_quantiles = self.quantile_net(
-            state_embeddings, hat_taus)
-
-        # Repeat current actions into (batch_size, num_taus, 1).
-        action_index = actions[..., None].expand(
-            self.batch_size, self.num_taus, 1)
+        current_s_quantiles = self.online_net.calculate_quantiles(
+            tau_hats, state_embeddings=state_embeddings)
 
         # Get quantile values of current states and current actions.
-        current_sa_quantiles = current_s_quantiles.gather(
-            dim=2, index=action_index)
+        current_sa_quantiles = evaluate_quantile_at_action(
+            current_s_quantiles, actions)
         assert current_sa_quantiles.shape == (
             self.batch_size, self.num_taus, 1)
 
         with torch.no_grad():
-            # Calculate next greedy actions.
-            if not self.double_q_learning:
-                next_state_embeddings = self.target_dqn_net(next_states)
+            # Calculate Q values of next states.
+            if self.double_q_learning:
+                next_q = self.online_net.calculate_q(states=next_states)
             else:
-                next_state_embeddings = self.dqn_net(next_states)
+                next_state_embeddings =\
+                    self.target_net.calculate_state_embeddings(next_states)
+                next_taus, next_tau_hats, _ =\
+                    self.target_net.calculate_fractions(
+                        state_embeddings=next_state_embeddings)
+                next_q = self.target_net.calculate_q(
+                    taus=next_taus, tau_hats=next_tau_hats,
+                    state_embeddings=next_state_embeddings)
 
-            # Calculate fractions corresponding to next states.
-            next_taus, next_hat_taus, _ =\
-                self.fraction_net(next_state_embeddings)
-
-            # Calculate next greedy actions.
-            next_actions = torch.argmax(self.calculate_q(
-                next_state_embeddings, next_taus, next_hat_taus,
-                target=not self.double_q_learning
-                ), dim=1).view(self.batch_size, 1, 1)
-
-            # Repeat next actions into (batch_size, num_taus, 1).
-            next_action_index = next_actions.expand(
-                self.batch_size, self.num_taus, 1)
+            # Calculate greedy actions.
+            next_actions = torch.argmax(next_q, dim=1, keepdim=True)
+            assert next_actions.shape == (self.batch_size, 1)
 
             # Calculate features of next states.
-            if not self.double_q_learning:
-                next_state_embeddings = self.dqn_net(next_states)
+            if self.double_q_learning:
+                next_state_embeddings =\
+                    self.target_net.calculate_state_embeddings(next_states)
+                next_taus, next_tau_hats, _ =\
+                    self.target_net.calculate_fractions(
+                        state_embeddings=next_state_embeddings)
 
             # Calculate quantile values of next states and all actions.
-            next_s_quantiles = self.target_quantile_net(
-                next_state_embeddings, next_hat_taus)
+            next_s_quantiles = self.target_net.calculate_quantiles(
+                taus=next_tau_hats, state_embeddings=next_state_embeddings)
 
             # Get quantile values of next states and next actions.
-            next_sa_quantiles = next_s_quantiles.gather(
-                dim=2, index=next_action_index).transpose(1, 2)
+            next_sa_quantiles = evaluate_quantile_at_action(
+                next_s_quantiles, next_actions).transpose(1, 2)
             assert next_sa_quantiles.shape == (
                 self.batch_size, 1, self.num_taus)
 
@@ -243,68 +230,6 @@ class FQFAgent(BaseAgent):
             self.batch_size, self.num_taus, self.num_taus)
 
         quantile_huber_loss = calculate_quantile_huber_loss(
-            td_errors, hat_taus.detach(), self.kappa)
+            td_errors, tau_hats.detach(), self.kappa)
 
         return quantile_huber_loss
-
-    def calculate_gradients_of_tau(self, state_embeddings, taus, hat_taus):
-
-        # NOTE: Gradients of taus should be calculated at current state and
-        # any possible actions, however, calculating fractions of each state
-        # and action is quite heavy. So Fraction Proposal Net depends only on
-        # the state and fractions are shared across all actions.
-
-        batch_size = state_embeddings.shape[0]
-
-        with torch.no_grad():
-            quantile_tau_i = self.quantile_net(
-                state_embeddings, taus[:, 1:-1])
-            assert quantile_tau_i.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
-
-            quantile_hat_tau_i = self.quantile_net(
-                state_embeddings, hat_taus[:, 1:])
-            assert quantile_hat_tau_i.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
-
-            quantile_hat_tau_i_minus_1 = self.quantile_net(
-                state_embeddings, hat_taus[:, :-1])
-            assert quantile_hat_tau_i_minus_1.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
-
-        gradients =\
-            2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
-
-        return gradients
-
-    def save_models(self, save_dir):
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-
-        torch.save(
-            self.dqn_net.state_dict(),
-            os.path.join(self.model_dir, 'dqn_net.pth'))
-        torch.save(
-            self.fraction_net.state_dict(),
-            os.path.join(save_dir, 'fraction_net.pth'))
-        torch.save(
-            self.quantile_net.state_dict(),
-            os.path.join(save_dir, 'quantile_net.pth'))
-        torch.save(
-            self.target_dqn_net.state_dict(),
-            os.path.join(self.model_dir, 'target_dqn_net.pth'))
-        torch.save(
-            self.target_quantile_net.state_dict(),
-            os.path.join(self.model_dir, 'target_quantile_net.pth'))
-
-    def load_models(self, save_dir):
-        self.dqn_net.load_state_dict(torch.load(
-            os.path.join(save_dir, 'dqn_net.pth')))
-        self.fraction_net.load_state_dict(torch.load(
-            os.path.join(save_dir, 'fraction_net.pth')))
-        self.quantile_net.load_state_dict(torch.load(
-            os.path.join(save_dir, 'quantile_net.pth')))
-        self.target_dqn_net.load_state_dict(torch.load(
-            os.path.join(save_dir, 'target_dqn_net.pth')))
-        self.target_quantile_net.load_state_dict(torch.load(
-            os.path.join(save_dir, 'target_quantile_net.pth')))

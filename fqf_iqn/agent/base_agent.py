@@ -32,10 +32,8 @@ class BaseAgent:
         self.device = torch.device(
             "cuda" if cuda and torch.cuda.is_available() else "cpu")
 
-        self.dqn_net = None
-        self.target_dqn_net = None
-        self.quantile_net = None
-        self.target_quantile_net = None
+        self.online_net = None
+        self.target_net = None
 
         # Replay memory which is memory-efficient to store stacked frames.
         self.memory = DummyMultiStepMemory(
@@ -98,10 +96,8 @@ class BaseAgent:
                 or np.random.rand() < self.epsilon_train.get()
 
     def update_target(self):
-        self.target_quantile_net.load_state_dict(
-            self.quantile_net.state_dict())
-        self.target_dqn_net.load_state_dict(
-            self.dqn_net.state_dict())
+        self.target_net.load_state_dict(
+            self.online_net.state_dict())
 
     def explore(self):
         # Act with randomness.
@@ -115,14 +111,24 @@ class BaseAgent:
         raise NotImplementedError
 
     def save_models(self, save_dir):
-        raise NotImplementedError
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        torch.save(
+            self.online_net.state_dict(),
+            os.path.join(save_dir, 'online_net.pth'))
+        torch.save(
+            self.target_net.state_dict(),
+            os.path.join(save_dir, 'target_net.pth'))
 
     def load_models(self, save_dir):
-        raise NotImplementedError
+        self.online_net.load_state_dict(torch.load(
+            os.path.join(save_dir, 'online_net.pth')))
+        self.target_net.load_state_dict(torch.load(
+            os.path.join(save_dir, 'target_net.pth')))
 
     def train_episode(self):
-        self.quantile_net.train()
-        self.target_quantile_net.train()
+        self.online_net.train()
+        self.target_net.train()
 
         self.episodes += 1
         episode_return = 0.
@@ -136,7 +142,7 @@ class BaseAgent:
 
             if self.steps % self.update_interval == 0:
                 # Reset the noise of noisy net (online net only).
-                self.quantile_net.reset_noise()
+                self.online_net.reset_noise()
 
             if self.is_greedy(eval=False):
                 action = self.explore()
@@ -161,6 +167,7 @@ class BaseAgent:
                 self.learning_time.append(time() - l_time)
 
             if self.steps % self.eval_interval == 0:
+                self.online_net.eval()
                 e_time = time()
                 self.evaluate()
                 e_time = time() - e_time
@@ -168,6 +175,7 @@ class BaseAgent:
                     'time/evaluation_time', e_time, 4 * self.steps)
                 t_time += e_time
                 self.save_models(os.path.join(self.model_dir, 'final'))
+                self.online_net.train()
 
             state = next_state
 
@@ -188,8 +196,6 @@ class BaseAgent:
               f'return: {episode_return:<5.1f}')
 
     def evaluate(self):
-        self.quantile_net.eval()
-
         num_episodes = 0
         num_steps = 0
         total_return = 0.0

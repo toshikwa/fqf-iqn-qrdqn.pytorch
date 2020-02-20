@@ -1,10 +1,9 @@
-import os
 import torch
 from torch.optim import Adam
 
-from fqf_iqn.network import DQNBase, QuantileValueNetwork
+from fqf_iqn.model import IQN
 from fqf_iqn.utils import disable_gradients, update_params,\
-    calculate_quantile_huber_loss
+    calculate_quantile_huber_loss, evaluate_quantile_at_action
 from .base_agent import BaseAgent
 
 
@@ -27,32 +26,24 @@ class IQNAgent(BaseAgent):
             eval_interval, num_eval_steps, max_episode_steps, grad_cliping,
             cuda, seed)
 
-        # Feature extractor.
-        self.dqn_net = DQNBase(
-            num_channels=env.observation_space.shape[0]).to(self.device)
-        # Quantile Value Network.
-        self.quantile_net = QuantileValueNetwork(
-            num_actions=self.num_actions, num_cosines=num_cosines,
-            dueling_net=dueling_net, noisy_net=noisy_net
-            ).to(self.device)
-
-        # Target Network.
-        self.target_dqn_net = DQNBase(
-            num_channels=env.observation_space.shape[0]).to(self.device)
-        self.target_quantile_net = QuantileValueNetwork(
-            num_actions=self.num_actions, num_cosines=num_cosines,
-            dueling_net=dueling_net, noisy_net=noisy_net
-            ).to(self.device)
+        # Online network.
+        self.online_net = IQN(
+            num_channels=env.observation_space.shape[0],
+            num_actions=self.num_actions, K=K, num_cosines=num_cosines,
+            dueling_net=dueling_net, noisy_net=noisy_net).to(self.device)
+        # Target network.
+        self.target_net = IQN(
+            num_channels=env.observation_space.shape[0],
+            num_actions=self.num_actions, K=K, num_cosines=num_cosines,
+            dueling_net=dueling_net, noisy_net=noisy_net).to(self.device)
 
         # Copy parameters of the learning network to the target network.
         self.update_target()
         # Disable calculations of gradients of the target network.
-        disable_gradients(self.target_dqn_net)
-        disable_gradients(self.target_quantile_net)
+        disable_gradients(self.target_net)
 
         self.optim = Adam(
-            list(self.dqn_net.parameters())
-            + list(self.quantile_net.parameters()),
+            self.online_net.parameters(),
             lr=lr, eps=1e-2/batch_size)
 
         self.N = N
@@ -66,33 +57,9 @@ class IQNAgent(BaseAgent):
         state = torch.ByteTensor(
             state).unsqueeze(0).to(self.device).float() / 255.
         with torch.no_grad():
-            state_embedding = self.dqn_net(state)
-            action = self.calculate_q(state_embedding).argmax().item()
+            action = self.online_net.calculate_q(
+                states=state).argmax().item()
         return action
-
-    def calculate_q(self, state_embeddings, target=False):
-        batch_size = state_embeddings.shape[0]
-
-        # Sample fractions.
-        tau_tildes = torch.rand(
-            batch_size, self.K, dtype=state_embeddings.dtype,
-            device=state_embeddings.device)
-
-        # Calculate quantiles.
-        if not target:
-            quantiles = self.quantile_net(state_embeddings, tau_tildes)
-        else:
-            with torch.no_grad():
-                quantiles = self.target_quantile_net(
-                    state_embeddings, tau_tildes)
-
-        assert quantiles.shape == (batch_size, self.K, self.num_actions)
-
-        # Calculate expectations of values.
-        q = quantiles.mean(dim=1)
-        assert q.shape == (batch_size, self.num_actions)
-
-        return q
 
     def learn(self):
         self.learning_steps += 1
@@ -101,14 +68,14 @@ class IQNAgent(BaseAgent):
             self.memory.sample(self.batch_size)
 
         # Calculate features of states.
-        state_embeddings = self.dqn_net(states)
+        state_embeddings = self.online_net.calculate_state_embeddings(states)
 
         quantile_loss = self.calculate_loss(
             state_embeddings, actions, rewards, next_states, dones)
 
         update_params(
             self.optim, quantile_loss,
-            networks=[self.dqn_net, self.quantile_net],
+            networks=[self.online_net],
             retain_graph=False, grad_cliping=self.grad_cliping)
 
         if self.learning_steps % self.log_interval == 0:
@@ -117,7 +84,8 @@ class IQNAgent(BaseAgent):
                 self.learning_steps)
 
             with torch.no_grad():
-                q = self.calculate_q(state_embeddings)
+                q = self.online_net.calculate_q(
+                    state_embeddings=state_embeddings)
             self.writer.add_scalar(
                 'stats/mean_Q', q.mean().item(),
                 self.learning_steps)
@@ -134,35 +102,34 @@ class IQNAgent(BaseAgent):
             device=state_embeddings.device)
 
         # Calculate quantile values of current states and all actions.
-        current_s_quantiles = self.quantile_net(state_embeddings, taus)
-
-        # Repeat current actions into (batch_size, N, 1).
-        action_index = actions[..., None].expand(
-            self.batch_size, self.N, 1)
+        current_s_quantiles = self.online_net.calculate_quantiles(
+            taus, state_embeddings=state_embeddings)
+        assert current_s_quantiles.shape == (
+            self.batch_size, self.N, self.num_actions)
 
         # Calculate quantile values of current states and current actions.
-        current_sa_quantiles = current_s_quantiles.gather(
-            dim=2, index=action_index)
+        current_sa_quantiles = evaluate_quantile_at_action(
+            current_s_quantiles, actions)
         assert current_sa_quantiles.shape == (self.batch_size, self.N, 1)
 
         with torch.no_grad():
-            # Calculate next greedy actions.
-            if not self.double_q_learning:
-                next_state_embeddings = self.target_dqn_net(next_states)
+            # Calculate Q values of next states.
+            if self.double_q_learning:
+                next_q = self.online_net.calculate_q(states=next_states)
             else:
-                next_state_embeddings = self.dqn_net(next_states)
+                next_state_embeddings =\
+                    self.target_net.calculate_state_embeddings(next_states)
+                next_q = self.target_net.calculate_q(
+                    state_embeddings=next_state_embeddings)
 
-            next_actions = torch.argmax(self.calculate_q(
-                next_state_embeddings, target=not self.double_q_learning
-                ), dim=1).view(self.batch_size, 1, 1)
+            # Calculate greedy actions.
+            next_actions = torch.argmax(next_q, dim=1, keepdim=True)
+            assert next_actions.shape == (self.batch_size, 1)
 
             # Calculate features of next states.
-            if not self.double_q_learning:
-                next_state_embeddings = self.dqn_net(next_states)
-
-            # Repeat next actions into (batch_size, N_dash, 1).
-            next_action_index = next_actions.expand(
-                self.batch_size, self.N_dash, 1)
+            if self.double_q_learning:
+                next_state_embeddings =\
+                    self.target_net.calculate_state_embeddings(next_states)
 
             # Sample next fractions.
             tau_dashes = torch.rand(
@@ -170,12 +137,12 @@ class IQNAgent(BaseAgent):
                 device=state_embeddings.device)
 
             # Calculate quantile values of next states and all actions.
-            next_s_quantiles = self.target_quantile_net(
-                next_state_embeddings, tau_dashes)
+            next_s_quantiles = self.target_net.calculate_quantiles(
+                tau_dashes, state_embeddings=next_state_embeddings)
 
             # Calculate quantile values of next states and next actions.
-            next_sa_quantiles = next_s_quantiles.gather(
-                dim=2, index=next_action_index).transpose(1, 2)
+            next_sa_quantiles = evaluate_quantile_at_action(
+                next_s_quantiles, next_actions).transpose(1, 2)
             assert next_sa_quantiles.shape == (self.batch_size, 1, self.N_dash)
 
             # Calculate target quantile values.
@@ -191,30 +158,3 @@ class IQNAgent(BaseAgent):
             td_errors, taus, self.kappa)
 
         return quantile_huber_loss
-
-    def save_models(self, save_dir):
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
-
-        torch.save(
-            self.dqn_net.state_dict(),
-            os.path.join(self.model_dir, 'dqn_net.pth'))
-        torch.save(
-            self.quantile_net.state_dict(),
-            os.path.join(self.model_dir, 'quantile_net.pth'))
-        torch.save(
-            self.target_dqn_net.state_dict(),
-            os.path.join(self.model_dir, 'target_dqn_net.pth'))
-        torch.save(
-            self.target_quantile_net.state_dict(),
-            os.path.join(self.model_dir, 'target_quantile_net.pth'))
-
-    def load_models(self, save_dir):
-        self.dqn_net.load_state_dict(torch.load(
-            os.path.join(self.model_dir, 'dqn_net.pth')))
-        self.quantile_net.load_state_dict(torch.load(
-            os.path.join(self.model_dir, 'quantile_net.pth')))
-        self.target_dqn_net.load_state_dict(torch.load(
-            os.path.join(self.model_dir, 'target_dqn_net.pth')))
-        self.target_quantile_net.load_state_dict(torch.load(
-            os.path.join(self.model_dir, 'target_quantile_net.pth')))

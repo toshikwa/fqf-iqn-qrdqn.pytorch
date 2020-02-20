@@ -46,6 +46,21 @@ def calculate_quantile_huber_loss(td_errors, taus, kappa=1.0):
     return element_wise_quantile_huber_loss.sum(dim=1).mean()
 
 
+def evaluate_quantile_at_action(s_quantiles, actions):
+    assert s_quantiles.shape[0] == actions.shape[0]
+
+    batch_size = s_quantiles.shape[0]
+    num_taus = s_quantiles.shape[1]
+
+    # Expand actions into (batch_size, num_taus, 1).
+    action_index = actions[..., None].expand(batch_size, num_taus, 1)
+
+    # Calculate quantile values at specified actions.
+    sa_quantiles = s_quantiles.gather(dim=2, index=action_index)
+
+    return sa_quantiles
+
+
 class RunningMeanStats:
 
     def __init__(self, n=10):
