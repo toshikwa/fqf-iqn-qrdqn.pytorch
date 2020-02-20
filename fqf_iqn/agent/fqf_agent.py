@@ -150,18 +150,18 @@ class FQFAgent(BaseAgent):
             assert quantile_tau_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            quantile_hat_tau_i = self.online_net.calculate_quantiles(
+            quantile_tau_hat_i = self.online_net.calculate_quantiles(
                 taus=tau_hats[:, 1:], state_embeddings=state_embeddings)
-            assert quantile_hat_tau_i.shape == (
+            assert quantile_tau_hat_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            quantile_hat_tau_i_minus_1 = self.online_net.calculate_quantiles(
+            quantile_tau_hat_i_minus_1 = self.online_net.calculate_quantiles(
                 taus=tau_hats[:, :-1], state_embeddings=state_embeddings)
-            assert quantile_hat_tau_i_minus_1.shape == (
+            assert quantile_tau_hat_i_minus_1.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
         gradient_of_taus =\
-            2*quantile_tau_i - quantile_hat_tau_i - quantile_hat_tau_i_minus_1
+            2*quantile_tau_i - quantile_tau_hat_i - quantile_tau_hat_i_minus_1
 
         # Gradients of the network parameters and corresponding loss
         # are calculated using chain rule.
