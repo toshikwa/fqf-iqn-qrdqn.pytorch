@@ -1,5 +1,4 @@
 import os
-from time import time
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
@@ -50,8 +49,6 @@ class BaseAgent:
 
         self.writer = SummaryWriter(log_dir=self.summary_dir)
         self.train_return = RunningMeanStats(log_interval)
-        self.training_time = RunningMeanStats(log_interval)
-        self.learning_time = RunningMeanStats(log_interval)
 
         self.steps = 0
         self.learning_steps = 0
@@ -133,7 +130,6 @@ class BaseAgent:
         self.episodes += 1
         episode_return = 0.
         episode_steps = 0
-        t_time = time()
 
         done = False
         state = self.env.reset()
@@ -162,34 +158,23 @@ class BaseAgent:
                 self.update_target()
 
             if self.is_update():
-                l_time = time()
                 self.learn()
-                self.learning_time.append(time() - l_time)
 
             if self.steps % self.eval_interval == 0:
                 self.online_net.eval()
-                e_time = time()
                 self.evaluate()
-                e_time = time() - e_time
-                self.writer.add_scalar(
-                    'time/evaluation_time', e_time, 4 * self.steps)
-                t_time += e_time
                 self.save_models(os.path.join(self.model_dir, 'final'))
                 self.online_net.train()
 
             state = next_state
 
         # We log running mean of stats.
-        self.training_time.append((time() - t_time) / episode_steps)
         self.train_return.append(episode_return)
 
         # We log evaluation results along with training frames = 4 * steps.
         if self.episodes % self.log_interval == 0:
             self.writer.add_scalar(
                 'return/train', self.train_return.get(), 4 * self.steps)
-            self.writer.add_scalar(
-                'time/mean_training_time', self.training_time.get(),
-                4 * self.steps)
 
         print(f'Episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '

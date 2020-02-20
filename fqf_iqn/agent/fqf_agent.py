@@ -3,7 +3,7 @@ from torch.optim import Adam, RMSprop
 
 from fqf_iqn.model import FQF
 from fqf_iqn.utils import disable_gradients, update_params,\
-    calculate_quantile_huber_loss, evaluate_quantile_at_action, LinearAnneaer
+    calculate_quantile_huber_loss, evaluate_quantile_at_action
 from .base_agent import BaseAgent
 
 
@@ -62,9 +62,7 @@ class FQFAgent(BaseAgent):
         # one rarely (e.g. 1 out of 20 seeds). So you can use entropy of value
         # distribution as a regularizer to stabilize (but possibly slow down)
         # training.
-        self.ent_coef = LinearAnneaer(
-            start_value=ent_coef, end_value=0,
-            num_steps=(num_steps-start_steps)//update_interval)
+        self.ent_coef = ent_coef
         self.num_taus = num_taus
         self.num_cosines = num_cosines
         self.kappa = kappa
@@ -82,7 +80,6 @@ class FQFAgent(BaseAgent):
 
     def learn(self):
         self.learning_steps += 1
-        self.ent_coef.step()
 
         states, actions, rewards, next_states, dones =\
             self.memory.sample(self.batch_size)
@@ -101,7 +98,7 @@ class FQFAgent(BaseAgent):
             state_embeddings, taus, tau_hats, actions, rewards,
             next_states, dones)
 
-        entropy_loss = -self.ent_coef.get() * entropies.mean()
+        entropy_loss = -self.ent_coef * entropies.mean()
 
         update_params(
             self.fraction_optim, fraction_loss + entropy_loss,
@@ -134,9 +131,6 @@ class FQFAgent(BaseAgent):
             self.writer.add_scalar(
                 'stats/mean_entropy_of_value_distribution',
                 entropies.mean().detach().item(), self.learning_steps)
-            self.writer.add_scalar(
-                'time/mean_learning_time', self.learning_time.get(),
-                self.learning_steps)
 
     def calculate_fraction_loss(self, state_embeddings, taus, tau_hats):
 
