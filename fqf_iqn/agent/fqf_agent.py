@@ -181,17 +181,16 @@ class FQFAgent(BaseAgent):
             self.batch_size, self.num_taus, 1)
 
         with torch.no_grad():
+            # NOTE: Current and target quantiles share the same proposed
+            # fractions to reduce computations. (i.e. next_taus = taus)
+
             # Calculate Q values of next states.
             if self.double_q_learning:
                 next_q = self.online_net.calculate_q(states=next_states)
             else:
                 next_state_embeddings =\
                     self.target_net.calculate_state_embeddings(next_states)
-                next_taus, next_tau_hats, _ =\
-                    self.target_net.calculate_fractions(
-                        state_embeddings=next_state_embeddings)
                 next_q = self.target_net.calculate_q(
-                    taus=next_taus, tau_hats=next_tau_hats,
                     state_embeddings=next_state_embeddings)
 
             # Calculate greedy actions.
@@ -202,13 +201,10 @@ class FQFAgent(BaseAgent):
             if self.double_q_learning:
                 next_state_embeddings =\
                     self.target_net.calculate_state_embeddings(next_states)
-                next_taus, next_tau_hats, _ =\
-                    self.target_net.calculate_fractions(
-                        state_embeddings=next_state_embeddings)
 
             # Calculate quantile values of next states and all actions.
             next_s_quantiles = self.target_net.calculate_quantiles(
-                taus=next_tau_hats, state_embeddings=next_state_embeddings)
+                taus=tau_hats, state_embeddings=next_state_embeddings)
 
             # Get quantile values of next states and next actions.
             next_sa_quantiles = evaluate_quantile_at_action(

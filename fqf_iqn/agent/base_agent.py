@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from fqf_iqn.memory import DummyMultiStepMemory
+from fqf_iqn.memory import LazyMultiStepMemory
 from fqf_iqn.utils import RunningMeanStats, LinearAnneaer
 
 
@@ -35,7 +35,7 @@ class BaseAgent:
         self.target_net = None
 
         # Replay memory which is memory-efficient to store stacked frames.
-        self.memory = DummyMultiStepMemory(
+        self.memory = LazyMultiStepMemory(
             memory_size, self.env.observation_space.shape,
             self.device, gamma, multi_step)
 

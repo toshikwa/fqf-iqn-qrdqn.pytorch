@@ -45,13 +45,13 @@ class MultiStepBuff:
         return len(self.memory['state'])
 
 
-class DummyMemory(dict):
+class LazyMemory(dict):
     state_keys = ['state', 'next_state']
     np_keys = ['action', 'reward', 'done']
     keys = state_keys + np_keys
 
     def __init__(self, capacity, state_shape, device):
-        super(DummyMemory, self).__init__()
+        super(LazyMemory, self).__init__()
         self.capacity = int(capacity)
         self.state_shape = state_shape
         self.device = device
@@ -142,11 +142,11 @@ class DummyMemory(dict):
         assert self._n == len(self)
 
 
-class DummyMultiStepMemory(DummyMemory):
+class LazyMultiStepMemory(LazyMemory):
 
     def __init__(self, capacity, state_shape, device, gamma=0.99,
                  multi_step=3):
-        super(DummyMultiStepMemory, self).__init__(
+        super(LazyMultiStepMemory, self).__init__(
             capacity, state_shape, device)
 
         self.gamma = gamma
