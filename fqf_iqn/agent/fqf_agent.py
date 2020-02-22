@@ -48,14 +48,15 @@ class FQFAgent(BaseAgent):
         # NOTE: In the paper, learning rate of Fraction Proposal Net is
         # swept between (0, 2.5e-5) and finally fixed at 2.5e-9. However,
         # I don't sweep it for simplicity.
+        self.fraction_optim = RMSprop(
+            self.online_net.fraction_net.parameters(),
+            lr=fraction_lr, alpha=0.95, eps=0.00001)
+
         self.quantile_optim = Adam(
             list(self.online_net.dqn_net.parameters())
             + list(self.online_net.cosine_net.parameters())
             + list(self.online_net.quantile_net.parameters()),
             lr=quantile_lr, eps=1e-2/batch_size)
-        self.fraction_optim = RMSprop(
-            self.online_net.fraction_net.parameters(),
-            lr=fraction_lr, alpha=0.95, eps=0.00001)
 
         # NOTE: The author said the training of Fraction Proposal Net is
         # unstable and value distribution degenerates into a deterministic
@@ -92,11 +93,11 @@ class FQFAgent(BaseAgent):
                 state_embeddings=state_embeddings)
 
         fraction_loss = self.calculate_fraction_loss(
-            state_embeddings, taus, tau_hats)
+            state_embeddings, taus, tau_hats, actions)
 
         quantile_loss = self.calculate_quantile_loss(
-            state_embeddings, taus, tau_hats, actions, rewards,
-            next_states, dones)
+            state_embeddings, taus.detach(), tau_hats.detach(), actions,
+            rewards, next_states, dones)
 
         entropy_loss = -self.ent_coef * entropies.mean()
 
@@ -132,43 +133,45 @@ class FQFAgent(BaseAgent):
                 'stats/mean_entropy_of_value_distribution',
                 entropies.mean().detach().item(), self.learning_steps)
 
-    def calculate_fraction_loss(self, state_embeddings, taus, tau_hats):
-
-        # NOTE: Gradients of taus should be calculated at current state and
-        # any possible actions, however, calculating fractions of each state
-        # and action is quite heavy. So Fraction Proposal Net depends only on
-        # the state and fractions are shared across all actions.
+    def calculate_fraction_loss(self, state_embeddings, taus, tau_hats,
+                                actions):
 
         batch_size = state_embeddings.shape[0]
 
         with torch.no_grad():
-            quantile_tau_i = self.online_net.calculate_quantiles(
+            s_quantile_tau_i = self.online_net.calculate_quantiles(
                 taus=taus[:, 1:-1], state_embeddings=state_embeddings)
-            assert quantile_tau_i.shape == (
+            assert s_quantile_tau_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            quantile_tau_hat_i = self.online_net.calculate_quantiles(
+            s_quantile_tau_hat_i = self.online_net.calculate_quantiles(
                 taus=tau_hats[:, 1:], state_embeddings=state_embeddings)
-            assert quantile_tau_hat_i.shape == (
+            assert s_quantile_tau_hat_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            quantile_tau_hat_i_minus_1 = self.online_net.calculate_quantiles(
+            s_quantile_tau_hat_i_minus_1 = self.online_net.calculate_quantiles(
                 taus=tau_hats[:, :-1], state_embeddings=state_embeddings)
-            assert quantile_tau_hat_i_minus_1.shape == (
+            assert s_quantile_tau_hat_i_minus_1.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-        gradient_of_taus =\
-            2*quantile_tau_i - quantile_tau_hat_i - quantile_tau_hat_i_minus_1
+        gradient_of_taus = evaluate_quantile_at_action(
+            2 * s_quantile_tau_i
+            - s_quantile_tau_hat_i - s_quantile_tau_hat_i_minus_1,
+            actions).view(batch_size, self.num_taus-1)
+        assert not gradient_of_taus.requires_grad
 
         # Gradients of the network parameters and corresponding loss
         # are calculated using chain rule.
         fraction_loss = (
-            gradient_of_taus.mean(dim=2) * taus[:, 1:-1]).sum(dim=1).mean()
+            gradient_of_taus * taus[:, 1:-1]).sum(dim=1).mean()
 
         return fraction_loss
 
     def calculate_quantile_loss(self, state_embeddings, taus, tau_hats,
                                 actions, rewards, next_states, dones):
+
+        # NOTE: Fractions should be detached when updating Quantile Value Net.
+        assert not taus.requires_grad and not tau_hats.requires_grad
 
         # Calculate quantile values of current states and all actions.
         current_s_quantiles = self.online_net.calculate_quantiles(
@@ -223,6 +226,6 @@ class FQFAgent(BaseAgent):
             self.batch_size, self.num_taus, self.num_taus)
 
         quantile_huber_loss = calculate_quantile_huber_loss(
-            td_errors, tau_hats.detach(), self.kappa)
+            td_errors, tau_hats, self.kappa)
 
         return quantile_huber_loss
