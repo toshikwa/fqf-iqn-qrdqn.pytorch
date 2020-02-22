@@ -201,9 +201,9 @@ class BaseAgent:
                 episode_steps += 1
                 episode_return += reward
                 state = next_state
-                if done:
-                    num_episodes += 1
-                    total_return += episode_return
+
+            num_episodes += 1
+            total_return += episode_return
 
             if num_steps > self.num_eval_steps:
                 break
