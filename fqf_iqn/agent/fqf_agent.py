@@ -139,7 +139,7 @@ class FQFAgent(BaseAgent):
         batch_size = state_embeddings.shape[0]
 
         with torch.no_grad():
-            s_quantile_tau_i = self.online_net.calculate_quantiles(
+            s_quantile_tau_i = self.target_net.calculate_quantiles(
                 taus=taus[:, 1:-1], state_embeddings=state_embeddings)
             assert s_quantile_tau_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
