@@ -93,7 +93,7 @@ class FQFAgent(BaseAgent):
                 state_embeddings=state_embeddings)
 
         fraction_loss = self.calculate_fraction_loss(
-            state_embeddings, taus, tau_hats, actions)
+            state_embeddings.detach(), taus, tau_hats, actions)
 
         quantile_loss = self.calculate_quantile_loss(
             state_embeddings, taus.detach(), tau_hats.detach(), actions,
@@ -144,12 +144,12 @@ class FQFAgent(BaseAgent):
             assert s_quantile_tau_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            s_quantile_tau_hat_i = self.online_net.calculate_quantiles(
+            s_quantile_tau_hat_i = self.target_net.calculate_quantiles(
                 taus=tau_hats[:, 1:], state_embeddings=state_embeddings)
             assert s_quantile_tau_hat_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            s_quantile_tau_hat_i_minus_1 = self.online_net.calculate_quantiles(
+            s_quantile_tau_hat_i_minus_1 = self.target_net.calculate_quantiles(
                 taus=tau_hats[:, :-1], state_embeddings=state_embeddings)
             assert s_quantile_tau_hat_i_minus_1.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
@@ -162,8 +162,7 @@ class FQFAgent(BaseAgent):
 
         # Gradients of the network parameters and corresponding loss
         # are calculated using chain rule.
-        fraction_loss = (
-            gradient_of_taus * taus[:, 1:-1]).sum(dim=1).mean()
+        fraction_loss = (gradient_of_taus * taus[:, 1:-1]).sum(dim=1).mean()
 
         return fraction_loss
 
