@@ -3,7 +3,7 @@ from torch.optim import Adam, RMSprop
 
 from fqf_iqn.model import FQF
 from fqf_iqn.utils import disable_gradients, update_params,\
-    calculate_quantile_huber_loss, evaluate_quantile_at_action
+    calculate_quantile_huber_loss, evaluate_quantile_at_action, LRSweeper
 from .base_agent import BaseAgent
 
 
@@ -45,18 +45,25 @@ class FQFAgent(BaseAgent):
         # Disable calculations of gradients of the target network.
         disable_gradients(self.target_net)
 
-        # NOTE: In the paper, learning rate of Fraction Proposal Net is
-        # swept between (0, 2.5e-5) and finally fixed at 2.5e-9. However,
-        # I don't sweep it for simplicity.
         self.fraction_optim = RMSprop(
             self.online_net.fraction_net.parameters(),
-            lr=fraction_lr, alpha=0.95, eps=0.00001)
+            lr=10**4*fraction_lr, alpha=0.95, eps=0.00001)
 
         self.quantile_optim = Adam(
             list(self.online_net.dqn_net.parameters())
             + list(self.online_net.cosine_net.parameters())
             + list(self.online_net.quantile_net.parameters()),
             lr=quantile_lr, eps=1e-2/batch_size)
+
+        # NOTE: In the paper, learning rate of Fraction Proposal Net is
+        # swept between (0, 2.5e-5) and finally fixed at 2.5e-9. I sweep
+        # learning rate from 2.5e-5 to 2.5e-9 step by step every 2M frames
+        # and finaly fix learning rate at 2.5e-9.
+        self.lr_sweeper = LRSweeper(
+            self.fraction_optim,
+            values=[coef * fraction_lr for coef in [
+                10**4, 5*10**3, 10**3, 5*10**2, 10**2, 5*10, 10, 5, 1]],
+            interval=2*10**6//4)
 
         # NOTE: The author said the training of Fraction Proposal Net is
         # unstable and value distribution degenerates into a deterministic
@@ -67,6 +74,10 @@ class FQFAgent(BaseAgent):
         self.num_taus = num_taus
         self.num_cosines = num_cosines
         self.kappa = kappa
+
+    def train_step_interval(self):
+        self.lr_sweeper.step()
+        super(FQFAgent, self).train_step_interval()
 
     def exploit(self, state):
         # Act without randomness.
@@ -115,23 +126,25 @@ class FQFAgent(BaseAgent):
         if self.learning_steps % self.log_interval == 0:
             self.writer.add_scalar(
                 'loss/fraction_loss', fraction_loss.detach().item(),
-                self.learning_steps)
+                4*self.steps)
             self.writer.add_scalar(
                 'loss/quantile_loss', quantile_loss.detach().item(),
-                self.learning_steps)
+                4*self.steps)
             self.writer.add_scalar(
                 'loss/entropy_loss', entropy_loss.detach().item(),
-                self.learning_steps)
+                4*self.steps)
 
             with torch.no_grad():
                 mean_q = self.online_net.calculate_q(
                     taus, tau_hats, state_embeddings=state_embeddings).mean()
 
             self.writer.add_scalar(
-                'stats/mean_Q', mean_q, self.learning_steps)
+                'stats/mean_Q', mean_q, 4*self.steps)
             self.writer.add_scalar(
                 'stats/mean_entropy_of_value_distribution',
-                entropies.mean().detach().item(), self.learning_steps)
+                entropies.mean().detach().item(), 4*self.steps)
+            self.writer.add_scalar(
+                'stats/fraction_lr', self.lr_sweeper.get(), 4*self.steps)
 
     def calculate_fraction_loss(self, state_embeddings, taus, tau_hats,
                                 actions):
@@ -139,17 +152,17 @@ class FQFAgent(BaseAgent):
         batch_size = state_embeddings.shape[0]
 
         with torch.no_grad():
-            s_quantile_tau_i = self.target_net.calculate_quantiles(
+            s_quantile_tau_i = self.online_net.calculate_quantiles(
                 taus=taus[:, 1:-1], state_embeddings=state_embeddings)
             assert s_quantile_tau_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            s_quantile_tau_hat_i = self.target_net.calculate_quantiles(
+            s_quantile_tau_hat_i = self.online_net.calculate_quantiles(
                 taus=tau_hats[:, 1:], state_embeddings=state_embeddings)
             assert s_quantile_tau_hat_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            s_quantile_tau_hat_i_minus_1 = self.target_net.calculate_quantiles(
+            s_quantile_tau_hat_i_minus_1 = self.online_net.calculate_quantiles(
                 taus=tau_hats[:, :-1], state_embeddings=state_embeddings)
             assert s_quantile_tau_hat_i_minus_1.shape == (
                 batch_size, self.num_taus-1, self.num_actions)

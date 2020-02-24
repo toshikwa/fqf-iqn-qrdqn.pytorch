@@ -78,17 +78,16 @@ class IQNAgent(BaseAgent):
             networks=[self.online_net],
             retain_graph=False, grad_cliping=self.grad_cliping)
 
-        if self.learning_steps % self.log_interval == 0:
+        if 4*self.steps % self.log_interval == 0:
             self.writer.add_scalar(
                 'loss/quantile_loss', quantile_loss.detach().item(),
-                self.learning_steps)
+                4*self.steps)
 
             with torch.no_grad():
                 q = self.online_net.calculate_q(
                     state_embeddings=state_embeddings)
             self.writer.add_scalar(
-                'stats/mean_Q', q.mean().item(),
-                self.learning_steps)
+                'stats/mean_Q', q.mean().item(), 4*self.steps)
 
     def calculate_loss(self, state_embeddings, actions, rewards, next_states,
                        dones):

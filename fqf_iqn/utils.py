@@ -93,3 +93,37 @@ class LinearAnneaer:
     def get(self):
         assert 0 < self.steps <= self.num_steps
         return self.a * self.steps + self.b
+
+
+class LRSweeper:
+
+    def __init__(self, optimizer, values, interval):
+        assert isinstance(values, list) or isinstance(values, tuple)
+        assert isinstance(interval, int) and interval > 0
+
+        self.optimizer = optimizer
+        self.values = values
+        self.interval = interval
+
+        self.steps = 0
+        self.index = 0
+        self.n = len(self.values)
+        self.set_lr()
+
+    def step(self):
+        if self.index == self.n - 1:
+            pass
+
+        self.steps += 1
+        if self.steps % self.interval == 0:
+            self.index += 1
+            self.set_lr()
+
+    def set_lr(self):
+        assert 0 <= self.index < self.n
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = self.values[self.index]
+        self.lr = self.values[self.index]
+
+    def get(self):
+        return self.lr

@@ -146,27 +146,16 @@ class BaseAgent:
                 action = self.exploit(state)
 
             next_state, reward, done, _ = self.env.step(action)
-            self.steps += 1
-            episode_steps += 1
-            episode_return += reward
-            self.epsilon_train.step()
 
             self.memory.append(
                 state, action, reward, next_state, done)
 
-            if self.steps % self.target_update_interval == 0:
-                self.update_target()
-
-            if self.is_update():
-                self.learn()
-
-            if self.steps % self.eval_interval == 0:
-                self.online_net.eval()
-                self.evaluate()
-                self.save_models(os.path.join(self.model_dir, 'final'))
-                self.online_net.train()
-
+            self.steps += 1
+            episode_steps += 1
+            episode_return += reward
             state = next_state
+
+            self.train_step_interval()
 
         # We log running mean of stats.
         self.train_return.append(episode_return)
@@ -179,6 +168,21 @@ class BaseAgent:
         print(f'Episode: {self.episodes:<4}  '
               f'episode steps: {episode_steps:<4}  '
               f'return: {episode_return:<5.1f}')
+
+    def train_step_interval(self):
+        self.epsilon_train.step()
+
+        if self.steps % self.target_update_interval == 0:
+            self.update_target()
+
+        if self.is_update():
+            self.learn()
+
+        if self.steps % self.eval_interval == 0:
+            self.online_net.eval()
+            self.evaluate()
+            self.save_models(os.path.join(self.model_dir, 'final'))
+            self.online_net.train()
 
     def evaluate(self):
         num_episodes = 0
