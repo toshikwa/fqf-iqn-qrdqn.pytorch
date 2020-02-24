@@ -38,7 +38,7 @@ class FQFAgent(BaseAgent):
             num_channels=env.observation_space.shape[0],
             num_actions=self.num_actions, num_taus=num_taus,
             num_cosines=num_cosines, dueling_net=dueling_net,
-            noisy_net=noisy_net).to(self.device)
+            noisy_net=noisy_net, target=True).to(self.device)
 
         # Copy parameters of the learning network to the target network.
         self.update_target()
@@ -74,6 +74,14 @@ class FQFAgent(BaseAgent):
         self.num_taus = num_taus
         self.num_cosines = num_cosines
         self.kappa = kappa
+
+    def update_target(self):
+        self.target_net.dqn_net.load_state_dict(
+            self.online_net.dqn_net.state_dict())
+        self.target_net.quantile_net.load_state_dict(
+            self.online_net.quantile_net.state_dict())
+        self.target_net.cosine_net.load_state_dict(
+            self.online_net.cosine_net.state_dict())
 
     def train_step_interval(self):
         self.lr_sweeper.step()
@@ -206,7 +214,8 @@ class FQFAgent(BaseAgent):
                 next_state_embeddings =\
                     self.target_net.calculate_state_embeddings(next_states)
                 next_q = self.target_net.calculate_q(
-                    state_embeddings=next_state_embeddings)
+                    state_embeddings=next_state_embeddings,
+                    fraction_net=self.online_net.fraction_net)
 
             # Calculate greedy actions.
             next_actions = torch.argmax(next_q, dim=1, keepdim=True)
