@@ -3,7 +3,7 @@ from torch.optim import Adam, RMSprop
 
 from fqf_iqn.model import FQF
 from fqf_iqn.utils import disable_gradients, update_params,\
-    calculate_quantile_huber_loss, evaluate_quantile_at_action, LRSweeper
+    calculate_quantile_huber_loss, evaluate_quantile_at_action
 from .base_agent import BaseAgent
 
 
@@ -18,7 +18,8 @@ class FQFAgent(BaseAgent):
                  epsilon_decay_steps=250000, double_q_learning=False,
                  dueling_net=False, noisy_net=False,
                  log_interval=100, eval_interval=250000, num_eval_steps=125000,
-                 max_episode_steps=27000, grad_cliping=5.0, cuda=True, seed=0):
+                 max_episode_steps=27000, grad_cliping=None, cuda=True,
+                 seed=0):
         super(FQFAgent, self).__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size,
             gamma, multi_step, update_interval, target_update_interval,
@@ -47,23 +48,13 @@ class FQFAgent(BaseAgent):
 
         self.fraction_optim = RMSprop(
             self.online_net.fraction_net.parameters(),
-            lr=10**4*fraction_lr, alpha=0.95, eps=0.00001)
+            lr=fraction_lr, alpha=0.95, eps=0.00001)
 
         self.quantile_optim = Adam(
             list(self.online_net.dqn_net.parameters())
             + list(self.online_net.cosine_net.parameters())
             + list(self.online_net.quantile_net.parameters()),
             lr=quantile_lr, eps=1e-2/batch_size)
-
-        # NOTE: In the paper, learning rate of Fraction Proposal Net is
-        # swept between (0, 2.5e-5) and finally fixed at 2.5e-9. I sweep
-        # learning rate from 2.5e-5 to 2.5e-9 step by step every 2M frames
-        # and finaly fix learning rate at 2.5e-9.
-        self.lr_sweeper = LRSweeper(
-            self.fraction_optim,
-            values=[coef * fraction_lr for coef in [
-                10**4, 5*10**3, 10**3, 5*10**2, 10**2, 5*10, 10, 5, 1]],
-            interval=2*10**6//4)
 
         # NOTE: The author said the training of Fraction Proposal Net is
         # unstable and value distribution degenerates into a deterministic
@@ -83,17 +74,13 @@ class FQFAgent(BaseAgent):
         self.target_net.cosine_net.load_state_dict(
             self.online_net.cosine_net.state_dict())
 
-    def train_step_interval(self):
-        self.lr_sweeper.step()
-        super(FQFAgent, self).train_step_interval()
-
     def exploit(self, state):
         # Act without randomness.
         state = torch.ByteTensor(
             state).unsqueeze(0).to(self.device).float() / 255.
 
+        # Calculate Q and get greedy action.
         with torch.no_grad():
-            # Calculate Q and get greedy action.
             action = self.online_net.calculate_q(states=state).argmax().item()
 
         return action
@@ -151,8 +138,6 @@ class FQFAgent(BaseAgent):
             self.writer.add_scalar(
                 'stats/mean_entropy_of_value_distribution',
                 entropies.mean().detach().item(), 4*self.steps)
-            self.writer.add_scalar(
-                'stats/fraction_lr', self.lr_sweeper.get(), 4*self.steps)
 
     def calculate_fraction_loss(self, state_embeddings, taus, tau_hats,
                                 actions):

@@ -17,7 +17,8 @@ class IQNAgent(BaseAgent):
                  epsilon_decay_steps=250000, double_q_learning=False,
                  dueling_net=False, noisy_net=False,
                  log_interval=100, eval_interval=250000, num_eval_steps=125000,
-                 max_episode_steps=27000, grad_cliping=5.0, cuda=True, seed=0):
+                 max_episode_steps=27000, grad_cliping=None, cuda=True,
+                 seed=0):
         super(IQNAgent, self).__init__(
             env, test_env, log_dir, num_steps, batch_size, memory_size,
             gamma, multi_step, update_interval, target_update_interval,
