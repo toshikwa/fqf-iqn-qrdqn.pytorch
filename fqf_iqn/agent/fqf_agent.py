@@ -141,29 +141,41 @@ class FQFAgent(BaseAgent):
 
     def calculate_fraction_loss(self, state_embeddings, taus, tau_hats,
                                 actions):
-
         batch_size = state_embeddings.shape[0]
 
         with torch.no_grad():
-            s_quantile_tau_i = self.online_net.calculate_quantiles(
-                taus=taus[:, 1:-1], state_embeddings=state_embeddings)
+
+            s_quantile = self.target_net.calculate_quantiles(
+                taus=taus, state_embeddings=state_embeddings)
+            s_quantile_tau_i = s_quantile[:, 1:-1]
+
+            signs_1 = (s_quantile[:, 1:-1] > s_quantile[:, :-2]).float()
+            signs_2 = (s_quantile[:, 2:] > s_quantile[:, 1:-1]).float()
+
+            # s_quantile_tau_i = self.target_net.calculate_quantiles(
+            #     taus=taus[:, 1:-1], state_embeddings=state_embeddings)
             assert s_quantile_tau_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            s_quantile_tau_hat_i = self.online_net.calculate_quantiles(
+            s_quantile_tau_hat_i = self.target_net.calculate_quantiles(
                 taus=tau_hats[:, 1:], state_embeddings=state_embeddings)
             assert s_quantile_tau_hat_i.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
-            s_quantile_tau_hat_i_minus_1 = self.online_net.calculate_quantiles(
+            s_quantile_tau_hat_i_minus_1 = self.target_net.calculate_quantiles(
                 taus=tau_hats[:, :-1], state_embeddings=state_embeddings)
             assert s_quantile_tau_hat_i_minus_1.shape == (
                 batch_size, self.num_taus-1, self.num_actions)
 
         gradient_of_taus = evaluate_quantile_at_action(
-            2 * s_quantile_tau_i
-            - s_quantile_tau_hat_i - s_quantile_tau_hat_i_minus_1,
+            signs_1 * (s_quantile_tau_i - s_quantile_tau_hat_i_minus_1) +
+            signs_2 * (s_quantile_tau_i - s_quantile_tau_hat_i),
             actions).view(batch_size, self.num_taus-1)
+
+        # gradient_of_taus = evaluate_quantile_at_action(
+        #     2 * s_quantile_tau_i
+        #     - s_quantile_tau_hat_i - s_quantile_tau_hat_i_minus_1,
+        #     actions).view(batch_size, self.num_taus-1)
         assert not gradient_of_taus.requires_grad
 
         # Gradients of the network parameters and corresponding loss
