@@ -149,8 +149,8 @@ class FQFAgent(BaseAgent):
                 taus=taus, state_embeddings=state_embeddings)
             s_quantile_tau_i = s_quantile[:, 1:-1]
 
-            signs_1 = (s_quantile[:, 1:-1] > s_quantile[:, :-2]).float()
-            signs_2 = (s_quantile[:, 2:] > s_quantile[:, 1:-1]).float()
+            signs_1 = (s_quantile[:, 1:-1] > s_quantile[:, :-2])
+            signs_2 = (s_quantile[:, 2:] > s_quantile[:, 1:-1])
 
             # s_quantile_tau_i = self.target_net.calculate_quantiles(
             #     taus=taus[:, 1:-1], state_embeddings=state_embeddings)
@@ -168,8 +168,14 @@ class FQFAgent(BaseAgent):
                 batch_size, self.num_taus-1, self.num_actions)
 
         gradient_of_taus = evaluate_quantile_at_action(
-            signs_1 * (s_quantile_tau_i - s_quantile_tau_hat_i_minus_1) +
-            signs_2 * (s_quantile_tau_i - s_quantile_tau_hat_i),
+            torch.where(
+                signs_1,
+                s_quantile_tau_i - s_quantile_tau_hat_i_minus_1,
+                -(s_quantile_tau_i - s_quantile_tau_hat_i_minus_1)) +
+            torch.where(
+                signs_2,
+                s_quantile_tau_i - s_quantile_tau_hat_i,
+                -(s_quantile_tau_i - s_quantile_tau_hat_i)),
             actions).view(batch_size, self.num_taus-1)
 
         # gradient_of_taus = evaluate_quantile_at_action(
