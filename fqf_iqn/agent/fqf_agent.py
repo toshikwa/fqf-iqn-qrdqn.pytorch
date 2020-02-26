@@ -78,7 +78,6 @@ class FQFAgent(BaseAgent):
         # Act without randomness.
         state = torch.ByteTensor(
             state).unsqueeze(0).to(self.device).float() / 255.
-
         # Calculate Q and get greedy action.
         with torch.no_grad():
             action = self.online_net.calculate_q(states=state).argmax().item()
@@ -93,16 +92,29 @@ class FQFAgent(BaseAgent):
 
         # Calculate embeddings of current states.
         state_embeddings = self.online_net.calculate_state_embeddings(states)
-        # Calculate fractions and entropies.
+
+        # Calculate fractions of current states and entropies.
         taus, tau_hats, entropies =\
             self.online_net.calculate_fractions(
                 state_embeddings=state_embeddings)
 
+        # Calculate quantile values of current states and actions at tau_hats.
+        current_sa_quantile_hats = evaluate_quantile_at_action(
+            self.online_net.calculate_quantiles(
+                tau_hats, state_embeddings=state_embeddings),
+            actions)
+        assert current_sa_quantile_hats.shape == (
+            self.batch_size, self.num_taus, 1)
+
+        # NOTE: Detach state_embeddings not to update convolution layers. Also,
+        # detach current_sa_quantile_hats because I calculate gradients of taus
+        # explicitly, not by backpropagation.
         fraction_loss = self.calculate_fraction_loss(
-            state_embeddings.detach(), taus, tau_hats, actions)
+            state_embeddings.detach(), current_sa_quantile_hats.detach(),
+            taus, actions)
 
         quantile_loss = self.calculate_quantile_loss(
-            state_embeddings, taus.detach(), tau_hats.detach(), actions,
+            state_embeddings, tau_hats, current_sa_quantile_hats, actions,
             rewards, next_states, dones)
 
         entropy_loss = -self.ent_coef * entropies.mean()
@@ -139,50 +151,36 @@ class FQFAgent(BaseAgent):
                 'stats/mean_entropy_of_value_distribution',
                 entropies.mean().detach().item(), 4*self.steps)
 
-    def calculate_fraction_loss(self, state_embeddings, taus, tau_hats,
+    def calculate_fraction_loss(self, state_embeddings, sa_quantile_hats, taus,
                                 actions):
+        assert not state_embeddings.requires_grad
+        assert not sa_quantile_hats.requires_grad
+
         batch_size = state_embeddings.shape[0]
 
         with torch.no_grad():
+            sa_quantiles = evaluate_quantile_at_action(
+                self.target_net.calculate_quantiles(
+                    taus=taus, state_embeddings=state_embeddings),
+                actions)
+            assert sa_quantiles.shape == (batch_size, self.num_taus+1, 1)
 
-            s_quantile = self.target_net.calculate_quantiles(
-                taus=taus, state_embeddings=state_embeddings)
-            s_quantile_tau_i = s_quantile[:, 1:-1]
+        # NOTE: Proposition 1 in the paper requires F^{-1} is non-decreasing.
+        # I relax this requirements and calculate gradients of taus when F^{-1}
+        # is not necessarily non-decreasing.
 
-            signs_1 = (s_quantile[:, 1:-1] > s_quantile[:, :-2])
-            signs_2 = (s_quantile[:, 2:] > s_quantile[:, 1:-1])
+        values_1 = sa_quantiles[:, 1:-1] - sa_quantile_hats[:, :-1]
+        signs_1 = (sa_quantiles[:, 1:-1] > sa_quantiles[:, :-2])
 
-            # s_quantile_tau_i = self.target_net.calculate_quantiles(
-            #     taus=taus[:, 1:-1], state_embeddings=state_embeddings)
-            assert s_quantile_tau_i.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
+        values_2 = sa_quantiles[:, 1:-1] - sa_quantile_hats[:, 1:]
+        signs_2 = (sa_quantiles[:, 2:] > sa_quantiles[:, 1:-1])
 
-            s_quantile_tau_hat_i = self.target_net.calculate_quantiles(
-                taus=tau_hats[:, 1:], state_embeddings=state_embeddings)
-            assert s_quantile_tau_hat_i.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
-
-            s_quantile_tau_hat_i_minus_1 = self.target_net.calculate_quantiles(
-                taus=tau_hats[:, :-1], state_embeddings=state_embeddings)
-            assert s_quantile_tau_hat_i_minus_1.shape == (
-                batch_size, self.num_taus-1, self.num_actions)
-
-        gradient_of_taus = evaluate_quantile_at_action(
-            torch.where(
-                signs_1,
-                s_quantile_tau_i - s_quantile_tau_hat_i_minus_1,
-                -(s_quantile_tau_i - s_quantile_tau_hat_i_minus_1)) +
-            torch.where(
-                signs_2,
-                s_quantile_tau_i - s_quantile_tau_hat_i,
-                -(s_quantile_tau_i - s_quantile_tau_hat_i)),
-            actions).view(batch_size, self.num_taus-1)
-
-        # gradient_of_taus = evaluate_quantile_at_action(
-        #     2 * s_quantile_tau_i
-        #     - s_quantile_tau_hat_i - s_quantile_tau_hat_i_minus_1,
-        #     actions).view(batch_size, self.num_taus-1)
+        gradient_of_taus = (
+            torch.where(signs_1, values_1, -values_1)
+            + torch.where(signs_2, values_2, -values_2)
+        ).view(batch_size, self.num_taus-1)
         assert not gradient_of_taus.requires_grad
+        assert gradient_of_taus.shape == taus[:, 1:-1].shape
 
         # Gradients of the network parameters and corresponding loss
         # are calculated using chain rule.
@@ -190,25 +188,16 @@ class FQFAgent(BaseAgent):
 
         return fraction_loss
 
-    def calculate_quantile_loss(self, state_embeddings, taus, tau_hats,
-                                actions, rewards, next_states, dones):
+    def calculate_quantile_loss(self, state_embeddings, tau_hats,
+                                current_sa_quantile_hats, actions, rewards,
+                                next_states, dones):
 
         # NOTE: Fractions should be detached when updating Quantile Value Net.
-        assert not taus.requires_grad and not tau_hats.requires_grad
-
-        # Calculate quantile values of current states and all actions.
-        current_s_quantiles = self.online_net.calculate_quantiles(
-            tau_hats, state_embeddings=state_embeddings)
-
-        # Get quantile values of current states and current actions.
-        current_sa_quantiles = evaluate_quantile_at_action(
-            current_s_quantiles, actions)
-        assert current_sa_quantiles.shape == (
-            self.batch_size, self.num_taus, 1)
+        assert not tau_hats.requires_grad
 
         with torch.no_grad():
             # NOTE: Current and target quantiles share the same proposed
-            # fractions to reduce computations. (i.e. next_taus = taus)
+            # fractions to reduce computations. (i.e. next_tau_hats = tau_hats)
 
             # Calculate Q values of next states.
             if self.double_q_learning:
@@ -229,23 +218,21 @@ class FQFAgent(BaseAgent):
                 next_state_embeddings =\
                     self.target_net.calculate_state_embeddings(next_states)
 
-            # Calculate quantile values of next states and all actions.
-            next_s_quantiles = self.target_net.calculate_quantiles(
-                taus=tau_hats, state_embeddings=next_state_embeddings)
-
-            # Get quantile values of next states and next actions.
-            next_sa_quantiles = evaluate_quantile_at_action(
-                next_s_quantiles, next_actions).transpose(1, 2)
-            assert next_sa_quantiles.shape == (
+            # Calculate quantile values of next states and actions at tau_hats.
+            next_sa_quantile_hats = evaluate_quantile_at_action(
+                self.target_net.calculate_quantiles(
+                    taus=tau_hats, state_embeddings=next_state_embeddings),
+                next_actions).transpose(1, 2)
+            assert next_sa_quantile_hats.shape == (
                 self.batch_size, 1, self.num_taus)
 
             # Calculate target quantile values.
-            target_sa_quantiles = rewards[..., None] + (
-                1.0 - dones[..., None]) * self.gamma_n * next_sa_quantiles
-            assert target_sa_quantiles.shape == (
+            target_sa_quantile_hats = rewards[..., None] + (
+                1.0 - dones[..., None]) * self.gamma_n * next_sa_quantile_hats
+            assert target_sa_quantile_hats.shape == (
                 self.batch_size, 1, self.num_taus)
 
-        td_errors = target_sa_quantiles - current_sa_quantiles
+        td_errors = target_sa_quantile_hats - current_sa_quantile_hats
         assert td_errors.shape == (
             self.batch_size, self.num_taus, self.num_taus)
 

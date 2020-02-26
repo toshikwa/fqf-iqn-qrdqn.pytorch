@@ -81,7 +81,7 @@ class FractionProposalNetwork(nn.Module):
         assert taus.shape == (batch_size, self.num_taus+1)
 
         # Calculate \hat \tau_i (i=0,...,N-1).
-        tau_hats = (taus[:, :-1] + taus[:, 1:]) / 2.
+        tau_hats = (taus[:, :-1] + taus[:, 1:]).detach() / 2.
         assert tau_hats.shape == (batch_size, self.num_taus)
 
         # Calculate entropies of value distributions.
