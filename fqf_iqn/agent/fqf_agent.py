@@ -166,8 +166,8 @@ class FQFAgent(BaseAgent):
             assert sa_quantiles.shape == (batch_size, self.num_taus+1, 1)
 
         # NOTE: Proposition 1 in the paper requires F^{-1} is non-decreasing.
-        # I relax this requirements and calculate gradients of taus when F^{-1}
-        # is not necessarily non-decreasing.
+        # I relax this requirements and calculate gradients of taus even when
+        # F^{-1} is not non-decreasing.
 
         values_1 = sa_quantiles[:, 1:-1] - sa_quantile_hats[:, :-1]
         signs_1 = (sa_quantiles[:, 1:-1] > sa_quantiles[:, :-2])
@@ -191,8 +191,6 @@ class FQFAgent(BaseAgent):
     def calculate_quantile_loss(self, state_embeddings, tau_hats,
                                 current_sa_quantile_hats, actions, rewards,
                                 next_states, dones):
-
-        # NOTE: Fractions should be detached when updating Quantile Value Net.
         assert not tau_hats.requires_grad
 
         with torch.no_grad():

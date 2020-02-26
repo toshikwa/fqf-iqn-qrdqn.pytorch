@@ -77,12 +77,14 @@ class FQF(nn.Module):
                 state_embeddings=state_embeddings, fraction_net=fraction_net)
 
         # Calculate quantiles.
-        quantiles = self.calculate_quantiles(
+        quantile_hats = self.calculate_quantiles(
             tau_hats, state_embeddings=state_embeddings)
-        assert quantiles.shape == (batch_size, self.num_taus, self.num_actions)
+        assert quantile_hats.shape == (
+            batch_size, self.num_taus, self.num_actions)
 
         # Calculate expectations of value distribution.
-        q = ((taus[:, 1:, None] - taus[:, :-1, None]) * quantiles).sum(dim=1)
+        q = ((taus[:, 1:, None] - taus[:, :-1, None]) * quantile_hats)\
+            .sum(dim=1)
         assert q.shape == (batch_size, self.num_actions)
 
         return q
