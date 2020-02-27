@@ -161,19 +161,23 @@ class FQFAgent(BaseAgent):
         with torch.no_grad():
             sa_quantiles = evaluate_quantile_at_action(
                 self.target_net.calculate_quantiles(
-                    taus=taus, state_embeddings=state_embeddings),
+                    taus=taus[:, 1:-1], state_embeddings=state_embeddings),
                 actions)
-            assert sa_quantiles.shape == (batch_size, self.num_taus+1, 1)
+            assert sa_quantiles.shape == (batch_size, self.num_taus-1, 1)
 
         # NOTE: Proposition 1 in the paper requires F^{-1} is non-decreasing.
         # I relax this requirements and calculate gradients of taus even when
         # F^{-1} is not non-decreasing.
 
-        values_1 = sa_quantiles[:, 1:-1] - sa_quantile_hats[:, :-1]
-        signs_1 = (sa_quantiles[:, 1:-1] > sa_quantiles[:, :-2])
+        values_1 = sa_quantiles - sa_quantile_hats[:, :-1]
+        signs_1 = sa_quantiles > torch.cat([
+            sa_quantile_hats[:, :1], sa_quantiles[:, :-1]], dim=1)
+        assert values_1.shape == signs_1.shape
 
-        values_2 = sa_quantiles[:, 1:-1] - sa_quantile_hats[:, 1:]
-        signs_2 = (sa_quantiles[:, 2:] > sa_quantiles[:, 1:-1])
+        values_2 = sa_quantiles - sa_quantile_hats[:, 1:]
+        signs_2 = sa_quantiles > torch.cat([
+            sa_quantiles[:, 1:], sa_quantile_hats[:, -1:]], dim=1)
+        assert values_2.shape == signs_2.shape
 
         gradient_of_taus = (
             torch.where(signs_1, values_1, -values_1)
