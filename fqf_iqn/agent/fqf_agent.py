@@ -175,7 +175,7 @@ class FQFAgent(BaseAgent):
         assert values_1.shape == signs_1.shape
 
         values_2 = sa_quantiles - sa_quantile_hats[:, 1:]
-        signs_2 = sa_quantiles > torch.cat([
+        signs_2 = sa_quantiles < torch.cat([
             sa_quantiles[:, 1:], sa_quantile_hats[:, -1:]], dim=1)
         assert values_2.shape == signs_2.shape
 
