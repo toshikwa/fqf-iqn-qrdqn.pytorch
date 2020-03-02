@@ -1,8 +1,8 @@
 import torch
 from torch import nn
 
-from fqf_iqn.network import DQNBase, CosineEmbeddingNetwork, QuantileNetwork,\
-    NoisyLinear
+from fqf_iqn_qrdqn.network import DQNBase, CosineEmbeddingNetwork,\
+    QuantileNetwork, NoisyLinear
 
 
 class IQN(nn.Module):

@@ -1,6 +1,6 @@
 from torch import nn
 
-from fqf_iqn.network import DQNBase, CosineEmbeddingNetwork,\
+from fqf_iqn_qrdqn.network import DQNBase, CosineEmbeddingNetwork,\
     FractionProposalNetwork, QuantileNetwork, NoisyLinear
 
 

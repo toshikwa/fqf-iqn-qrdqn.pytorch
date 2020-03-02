@@ -1,8 +1,8 @@
 import torch
 from torch.optim import Adam
 
-from fqf_iqn.model import IQN
-from fqf_iqn.utils import disable_gradients, update_params,\
+from fqf_iqn_qrdqn.model import IQN
+from fqf_iqn_qrdqn.utils import disable_gradients, update_params,\
     calculate_quantile_huber_loss, evaluate_quantile_at_action
 from .base_agent import BaseAgent
 

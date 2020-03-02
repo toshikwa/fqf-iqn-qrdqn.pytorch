@@ -3,8 +3,8 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from fqf_iqn.memory import LazyMultiStepMemory
-from fqf_iqn.utils import RunningMeanStats, LinearAnneaer
+from fqf_iqn_qrdqn.memory import LazyMultiStepMemory
+from fqf_iqn_qrdqn.utils import RunningMeanStats, LinearAnneaer
 
 
 class BaseAgent:
