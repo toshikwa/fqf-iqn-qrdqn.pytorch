@@ -1,6 +1,6 @@
 num_steps: 50000000  # It equals to 200M frames.
 batch_size: 32
-num_taus: 32
+N: 32
 num_cosines: 64
 ent_coef: 0  # You can use entropy loss as a regularizer.
 kappa: 1.0

@@ -10,7 +10,7 @@ from .base_agent import BaseAgent
 class FQFAgent(BaseAgent):
 
     def __init__(self, env, test_env, log_dir, num_steps=5*(10**7),
-                 batch_size=32, num_taus=32, num_cosines=64, ent_coef=0,
+                 batch_size=32, N=32, num_cosines=64, ent_coef=0,
                  kappa=1.0, quantile_lr=5e-5, fraction_lr=2.5e-9,
                  memory_size=10**6, gamma=0.99, multi_step=1,
                  update_interval=4, target_update_interval=10000,
@@ -31,13 +31,13 @@ class FQFAgent(BaseAgent):
         # Online network.
         self.online_net = FQF(
             num_channels=env.observation_space.shape[0],
-            num_actions=self.num_actions, num_taus=num_taus,
+            num_actions=self.num_actions, N=N,
             num_cosines=num_cosines, dueling_net=dueling_net,
             noisy_net=noisy_net).to(self.device)
         # Target network.
         self.target_net = FQF(
             num_channels=env.observation_space.shape[0],
-            num_actions=self.num_actions, num_taus=num_taus,
+            num_actions=self.num_actions, N=N,
             num_cosines=num_cosines, dueling_net=dueling_net,
             noisy_net=noisy_net, target=True).to(self.device)
 
@@ -62,7 +62,7 @@ class FQFAgent(BaseAgent):
         # distribution as a regularizer to stabilize (but possibly slow down)
         # training.
         self.ent_coef = ent_coef
-        self.num_taus = num_taus
+        self.N = N
         self.num_cosines = num_cosines
         self.kappa = kappa
 
@@ -94,7 +94,7 @@ class FQFAgent(BaseAgent):
                 tau_hats, state_embeddings=state_embeddings),
             actions)
         assert current_sa_quantile_hats.shape == (
-            self.batch_size, self.num_taus, 1)
+            self.batch_size, self.N, 1)
 
         # NOTE: Detach state_embeddings not to update convolution layers. Also,
         # detach current_sa_quantile_hats because I calculate gradients of taus
@@ -153,7 +153,7 @@ class FQFAgent(BaseAgent):
                 self.online_net.calculate_quantiles(
                     taus=taus[:, 1:-1], state_embeddings=state_embeddings),
                 actions)
-            assert sa_quantiles.shape == (batch_size, self.num_taus-1, 1)
+            assert sa_quantiles.shape == (batch_size, self.N-1, 1)
 
         # NOTE: Proposition 1 in the paper requires F^{-1} is non-decreasing.
         # I relax this requirements and calculate gradients of taus even when
@@ -172,7 +172,7 @@ class FQFAgent(BaseAgent):
         gradient_of_taus = (
             torch.where(signs_1, values_1, -values_1)
             + torch.where(signs_2, values_2, -values_2)
-        ).view(batch_size, self.num_taus-1)
+        ).view(batch_size, self.N-1)
         assert not gradient_of_taus.requires_grad
         assert gradient_of_taus.shape == taus[:, 1:-1].shape
 
@@ -216,17 +216,16 @@ class FQFAgent(BaseAgent):
                     taus=tau_hats, state_embeddings=next_state_embeddings),
                 next_actions).transpose(1, 2)
             assert next_sa_quantile_hats.shape == (
-                self.batch_size, 1, self.num_taus)
+                self.batch_size, 1, self.N)
 
             # Calculate target quantile values.
             target_sa_quantile_hats = rewards[..., None] + (
                 1.0 - dones[..., None]) * self.gamma_n * next_sa_quantile_hats
             assert target_sa_quantile_hats.shape == (
-                self.batch_size, 1, self.num_taus)
+                self.batch_size, 1, self.N)
 
         td_errors = target_sa_quantile_hats - current_sa_quantile_hats
-        assert td_errors.shape == (
-            self.batch_size, self.num_taus, self.num_taus)
+        assert td_errors.shape == (self.batch_size, self.N, self.N)
 
         quantile_huber_loss = calculate_quantile_huber_loss(
             td_errors, tau_hats, self.kappa)

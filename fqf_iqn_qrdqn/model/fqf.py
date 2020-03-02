@@ -6,7 +6,7 @@ from fqf_iqn_qrdqn.network import DQNBase, CosineEmbeddingNetwork,\
 
 class FQF(nn.Module):
 
-    def __init__(self, num_channels, num_actions, num_taus=32, num_cosines=32,
+    def __init__(self, num_channels, num_actions, N=32, num_cosines=32,
                  embedding_dim=7*7*64, dueling_net=False, noisy_net=False,
                  target=False):
         super(FQF, self).__init__()
@@ -25,9 +25,9 @@ class FQF(nn.Module):
         # Fraction proposal network.
         if not target:
             self.fraction_net = FractionProposalNetwork(
-                num_taus=num_taus, embedding_dim=embedding_dim)
+                N=N, embedding_dim=embedding_dim)
 
-        self.num_taus = num_taus
+        self.N = N
         self.num_channels = num_channels
         self.num_actions = num_actions
         self.num_cosines = num_cosines
@@ -79,8 +79,7 @@ class FQF(nn.Module):
         # Calculate quantiles.
         quantile_hats = self.calculate_quantiles(
             tau_hats, state_embeddings=state_embeddings)
-        assert quantile_hats.shape == (
-            batch_size, self.num_taus, self.num_actions)
+        assert quantile_hats.shape == (batch_size, self.N, self.num_actions)
 
         # Calculate expectations of value distribution.
         q = ((taus[:, 1:, None] - taus[:, :-1, None]) * quantile_hats)\

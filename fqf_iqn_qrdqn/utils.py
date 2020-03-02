@@ -29,19 +29,19 @@ def calculate_huber_loss(td_errors, kappa=1.0):
 
 def calculate_quantile_huber_loss(td_errors, taus, kappa=1.0):
     assert not taus.requires_grad
-    batch_size, num_taus, num_target_taus = td_errors.shape
+    batch_size, N, N_dash = td_errors.shape
 
     # Calculate huber loss element-wisely.
     element_wise_huber_loss = calculate_huber_loss(td_errors, kappa)
     assert element_wise_huber_loss.shape == (
-        batch_size, num_taus, num_target_taus)
+        batch_size, N, N_dash)
 
     # Calculate quantile huber loss element-wisely.
     element_wise_quantile_huber_loss = torch.abs(
         taus[..., None] - (td_errors.detach() < 0).float()
         ) * element_wise_huber_loss / kappa
     assert element_wise_quantile_huber_loss.shape == (
-        batch_size, num_taus, num_target_taus)
+        batch_size, N, N_dash)
 
     return element_wise_quantile_huber_loss.sum(dim=1).mean()
 
@@ -50,10 +50,10 @@ def evaluate_quantile_at_action(s_quantiles, actions):
     assert s_quantiles.shape[0] == actions.shape[0]
 
     batch_size = s_quantiles.shape[0]
-    num_taus = s_quantiles.shape[1]
+    N = s_quantiles.shape[1]
 
-    # Expand actions into (batch_size, num_taus, 1).
-    action_index = actions[..., None].expand(batch_size, num_taus, 1)
+    # Expand actions into (batch_size, N, 1).
+    action_index = actions[..., None].expand(batch_size, N, 1)
 
     # Calculate quantile values at specified actions.
     sa_quantiles = s_quantiles.gather(dim=2, index=action_index)
