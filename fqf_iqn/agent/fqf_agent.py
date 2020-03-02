@@ -74,16 +74,6 @@ class FQFAgent(BaseAgent):
         self.target_net.cosine_net.load_state_dict(
             self.online_net.cosine_net.state_dict())
 
-    def exploit(self, state):
-        # Act without randomness.
-        state = torch.ByteTensor(
-            state).unsqueeze(0).to(self.device).float() / 255.
-        # Calculate Q and get greedy action.
-        with torch.no_grad():
-            action = self.online_net.calculate_q(states=state).argmax().item()
-
-        return action
-
     def learn(self):
         self.learning_steps += 1
 

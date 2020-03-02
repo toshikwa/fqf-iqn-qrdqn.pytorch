@@ -102,7 +102,12 @@ class BaseAgent:
         return action
 
     def exploit(self, state):
-        raise NotImplementedError
+        # Act without randomness.
+        state = torch.ByteTensor(
+            state).unsqueeze(0).to(self.device).float() / 255.
+        with torch.no_grad():
+            action = self.online_net.calculate_q(states=state).argmax().item()
+        return action
 
     def learn(self):
         raise NotImplementedError

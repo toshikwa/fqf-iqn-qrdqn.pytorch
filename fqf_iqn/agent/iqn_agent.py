@@ -53,15 +53,6 @@ class IQNAgent(BaseAgent):
         self.num_cosines = num_cosines
         self.kappa = kappa
 
-    def exploit(self, state):
-        # Act without randomness.
-        state = torch.ByteTensor(
-            state).unsqueeze(0).to(self.device).float() / 255.
-        with torch.no_grad():
-            action = self.online_net.calculate_q(
-                states=state).argmax().item()
-        return action
-
     def learn(self):
         self.learning_steps += 1
 
@@ -98,16 +89,13 @@ class IQNAgent(BaseAgent):
             self.batch_size, self.N, dtype=state_embeddings.dtype,
             device=state_embeddings.device)
 
-        # Calculate quantile values of current states and all actions.
-        current_s_quantiles = self.online_net.calculate_quantiles(
-            taus, state_embeddings=state_embeddings)
-        assert current_s_quantiles.shape == (
-            self.batch_size, self.N, self.num_actions)
-
-        # Calculate quantile values of current states and current actions.
+        # Calculate quantile values of current states and actions at tau_hats.
         current_sa_quantiles = evaluate_quantile_at_action(
-            current_s_quantiles, actions)
-        assert current_sa_quantiles.shape == (self.batch_size, self.N, 1)
+            self.online_net.calculate_quantiles(
+                taus, state_embeddings=state_embeddings),
+            actions)
+        assert current_sa_quantiles.shape == (
+            self.batch_size, self.N, 1)
 
         with torch.no_grad():
             # Calculate Q values of next states.
@@ -133,13 +121,11 @@ class IQNAgent(BaseAgent):
                 self.batch_size, self.N_dash, dtype=state_embeddings.dtype,
                 device=state_embeddings.device)
 
-            # Calculate quantile values of next states and all actions.
-            next_s_quantiles = self.target_net.calculate_quantiles(
-                tau_dashes, state_embeddings=next_state_embeddings)
-
             # Calculate quantile values of next states and next actions.
             next_sa_quantiles = evaluate_quantile_at_action(
-                next_s_quantiles, next_actions).transpose(1, 2)
+                self.target_net.calculate_quantiles(
+                    tau_dashes, state_embeddings=next_state_embeddings
+                ), next_actions).transpose(1, 2)
             assert next_sa_quantiles.shape == (self.batch_size, 1, self.N_dash)
 
             # Calculate target quantile values.
