@@ -127,9 +127,10 @@ class FQFAgent(BaseAgent):
             self.writer.add_scalar(
                 'loss/quantile_loss', quantile_loss.detach().item(),
                 4*self.steps)
-            self.writer.add_scalar(
-                'loss/entropy_loss', entropy_loss.detach().item(),
-                4*self.steps)
+            if self.ent_coef > 0.0:
+                self.writer.add_scalar(
+                    'loss/entropy_loss', entropy_loss.detach().item(),
+                    4*self.steps)
 
             with torch.no_grad():
                 mean_q = self.online_net.calculate_q(
