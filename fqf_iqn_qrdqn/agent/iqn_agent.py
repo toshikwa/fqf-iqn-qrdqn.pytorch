@@ -62,7 +62,7 @@ class IQNAgent(BaseAgent):
         # Calculate features of states.
         state_embeddings = self.online_net.calculate_state_embeddings(states)
 
-        quantile_loss = self.calculate_loss(
+        quantile_loss, mean_q = self.calculate_loss(
             state_embeddings, actions, rewards, next_states, dones)
 
         update_params(
@@ -74,12 +74,7 @@ class IQNAgent(BaseAgent):
             self.writer.add_scalar(
                 'loss/quantile_loss', quantile_loss.detach().item(),
                 4*self.steps)
-
-            with torch.no_grad():
-                q = self.online_net.calculate_q(
-                    state_embeddings=state_embeddings)
-            self.writer.add_scalar(
-                'stats/mean_Q', q.mean().item(), 4*self.steps)
+            self.writer.add_scalar('stats/mean_Q', mean_q, 4*self.steps)
 
     def calculate_loss(self, state_embeddings, actions, rewards, next_states,
                        dones):
@@ -140,4 +135,4 @@ class IQNAgent(BaseAgent):
         quantile_huber_loss = calculate_quantile_huber_loss(
             td_errors, taus, self.kappa)
 
-        return quantile_huber_loss
+        return quantile_huber_loss, next_q.detach().mean().item()

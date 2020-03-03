@@ -6,11 +6,13 @@ This is a PyTorch implementation of Fully parameterized Quantile Function(FQF)[[
 You can install dependencies using `pip install -r requirements.txt`.
 
 ## Examples
-You can train FQF agent using hyperparameters [here](https://github.com/ku2482/fqf.pytorch/blob/master/config/fqf.yaml).
+You can train FQF agent using hyperparameters [here](https://github.com/ku2482/fqf-iqn-qrdqn.pytorch/blob/master/config/fqf.yaml).
 
 ```
 python train_fqf.py --cuda --env_id BreakoutNoFrameskip-v4 --seed 0 --config config/fqf.yaml
 ```
+
+You can also train IQN or QR-DQN agent in the same way. Note that we log results with the number of frames, which equals to the number of agent's steps multiplied by 4 (e.g. 100M frames means 25M agent's steps).
 
 ## References
 [[1]](https://arxiv.org/abs/1911.02140) Yang, Derek, et al. "Fully Parameterized Quantile Function for Distributional Reinforcement Learning." Advances in Neural Information Processing Systems. 2019.

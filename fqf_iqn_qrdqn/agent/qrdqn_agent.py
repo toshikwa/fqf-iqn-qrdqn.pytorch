@@ -73,8 +73,7 @@ class QRDQNAgent(BaseAgent):
             self.writer.add_scalar(
                 'loss/quantile_loss', quantile_loss.detach().item(),
                 4*self.steps)
-            self.writer.add_scalar(
-                'stats/mean_Q', mean_q, 4*self.steps)
+            self.writer.add_scalar('stats/mean_Q', mean_q, 4*self.steps)
 
     def calculate_loss(self, states, actions, rewards, next_states, dones):
 

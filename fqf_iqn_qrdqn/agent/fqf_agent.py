@@ -103,7 +103,7 @@ class FQFAgent(BaseAgent):
             state_embeddings.detach(), current_sa_quantile_hats.detach(),
             taus, actions)
 
-        quantile_loss = self.calculate_quantile_loss(
+        quantile_loss, mean_q = self.calculate_quantile_loss(
             state_embeddings, tau_hats, current_sa_quantile_hats, actions,
             rewards, next_states, dones)
 
@@ -132,12 +132,7 @@ class FQFAgent(BaseAgent):
                     'loss/entropy_loss', entropy_loss.detach().item(),
                     4*self.steps)
 
-            with torch.no_grad():
-                mean_q = self.online_net.calculate_q(
-                    taus, tau_hats, state_embeddings=state_embeddings).mean()
-
-            self.writer.add_scalar(
-                'stats/mean_Q', mean_q, 4*self.steps)
+            self.writer.add_scalar('stats/mean_Q', mean_q, 4*self.steps)
             self.writer.add_scalar(
                 'stats/mean_entropy_of_value_distribution',
                 entropies.mean().detach().item(), 4*self.steps)
@@ -231,4 +226,4 @@ class FQFAgent(BaseAgent):
         quantile_huber_loss = calculate_quantile_huber_loss(
             td_errors, tau_hats, self.kappa)
 
-        return quantile_huber_loss
+        return quantile_huber_loss, next_q.detach().mean().item()
