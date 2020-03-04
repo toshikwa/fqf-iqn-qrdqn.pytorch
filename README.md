@@ -9,7 +9,7 @@ You can install dependencies using `pip install -r requirements.txt`.
 You can train FQF agent using hyperparameters [here](https://github.com/ku2482/fqf-iqn-qrdqn.pytorch/blob/master/config/fqf.yaml).
 
 ```
-python train_fqf.py --cuda --env_id BreakoutNoFrameskip-v4 --seed 0 --config config/fqf.yaml
+python train_fqf.py --cuda --env_id PongNoFrameskip-v4 --seed 0 --config config/fqf.yaml
 ```
 
 You can also train IQN or QR-DQN agent in the same way. Note that we log results with the number of frames, which equals to the number of agent's steps multiplied by 4 (e.g. 100M frames means 25M agent's steps).
@@ -24,6 +24,11 @@ Note that I only trained a limited number of frames due to limited resources (e.
 I tested FQF and IQN on `BerzerkNoFrameskip-v4` to see the difference between FQF's performance and IQN's, which is quite obvious in FQF's paper.
 
 <img src="https://user-images.githubusercontent.com/37267851/75833357-2315e280-5dfc-11ea-88f1-ac8eba138953.png" title="BerzerkNoFrameskip-v4" width=700>
+
+## TODO
+
+- [ ] Support risk-averse policies in IQN.
+- [ ] Test FQF-Rainbow agent.
 
 ## References
 [[1]](https://arxiv.org/abs/1911.02140) Yang, Derek, et al. "Fully Parameterized Quantile Function for Distributional Reinforcement Learning." Advances in Neural Information Processing Systems. 2019.
