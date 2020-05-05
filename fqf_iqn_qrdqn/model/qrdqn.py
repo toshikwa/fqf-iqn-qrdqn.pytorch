@@ -79,4 +79,4 @@ class QRDQN(nn.Module):
         if self.noisy_net:
             for m in self.modules():
                 if isinstance(m, NoisyLinear):
-                    m.reset_noise()
+                    m.sample()
