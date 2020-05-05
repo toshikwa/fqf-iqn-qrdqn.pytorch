@@ -18,6 +18,7 @@ epsilon_decay_steps: 250000  # It equals to 1M frames.
 double_q_learning: False
 dueling_net: False
 noisy_net: False
+use_per: False
 log_interval: 100
 eval_interval: 250000
 num_eval_steps: 125000  # It equals to 500k frames.
