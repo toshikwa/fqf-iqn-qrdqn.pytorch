@@ -1,3 +1,4 @@
+from copy import copy
 import numpy as np
 import torch
 from torch import nn
@@ -185,7 +186,7 @@ class QuantileNetwork(nn.Module):
 
 
 class NoisyLinear(nn.Module):
-    def __init__(self, in_features, out_features, sigma_init=0.5):
+    def __init__(self, in_features, out_features, sigma=0.5):
         super(NoisyLinear, self).__init__()
 
         # Parameters of the layer.
@@ -205,7 +206,7 @@ class NoisyLinear(nn.Module):
 
         self.in_features = in_features
         self.out_features = out_features
-        self.sigma_init = sigma_init
+        self.sigma = sigma
 
         self.reset()
 
@@ -213,9 +214,8 @@ class NoisyLinear(nn.Module):
         bound = 1 / np.sqrt(self.in_features)
         self.mu_W.data.uniform_(-bound, bound)
         self.mu_bias.data.uniform_(-bound, bound)
-        self.sigma_W.data.fill_(self.sigma_init * bound)
-        self.sigma_bias.data.fill_(
-            self.sigma_init / np.sqrt(self.out_features))
+        self.sigma_W.data.fill_(self.sigma / np.sqrt(self.in_features))
+        self.sigma_bias.data.fill_(self.sigma / np.sqrt(self.out_features))
 
     def f(self, x):
         return x.normal_().sign().mul(x.abs().sqrt())
@@ -228,8 +228,9 @@ class NoisyLinear(nn.Module):
 
     def forward(self, x):
         if self.training:
-            weight = self.mu_W + self.sigma_W * self.eps_W
-            bias = self.mu_bias + self.sigma_bias * self.eps_bias
+            eps_W, eps_bias = copy(self.eps_W), copy(self.eps_bias)
+            weight = self.mu_W + self.sigma_W * eps_W
+            bias = self.mu_bias + self.sigma_bias * eps_bias
         else:
             weight = self.mu_W
             bias = self.mu_bias
