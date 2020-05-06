@@ -189,7 +189,7 @@ class NoisyLinear(nn.Module):
     def __init__(self, in_features, out_features, sigma=0.5):
         super(NoisyLinear, self).__init__()
 
-        # Parameters of the layer.
+        # Learnable parameters.
         self.mu_W = nn.Parameter(
             torch.FloatTensor(out_features, in_features))
         self.sigma_W = nn.Parameter(
@@ -197,22 +197,16 @@ class NoisyLinear(nn.Module):
         self.mu_bias = nn.Parameter(torch.FloatTensor(out_features))
         self.sigma_bias = nn.Parameter(torch.FloatTensor(out_features))
 
-        # Non-parameters.
-        self.register_buffer(
-            'eps_W1', torch.FloatTensor(out_features, in_features))
-        self.register_buffer('eps_bias1', torch.FloatTensor(out_features))
-        self.register_buffer(
-            'eps_W2', torch.FloatTensor(out_features, in_features))
-        self.register_buffer('eps_bias2', torch.FloatTensor(out_features))
+        # Factorized noise parameters.
         self.register_buffer('eps_p', torch.FloatTensor(in_features))
         self.register_buffer('eps_q', torch.FloatTensor(out_features))
 
-        self._cnt = 0
         self.in_features = in_features
         self.out_features = out_features
         self.sigma = sigma
 
         self.reset()
+        self.sample()
 
     def reset(self):
         bound = 1 / np.sqrt(self.in_features)
@@ -225,24 +219,13 @@ class NoisyLinear(nn.Module):
         return x.normal_().sign().mul(x.abs().sqrt())
 
     def sample(self):
-        self.eps_p = self.f(self.eps_p)
-        self.eps_q = self.f(self.eps_q)
-        if self._cnt:
-            self.eps_W1.copy_(self.eps_q.ger(self.eps_p))
-            self.eps_bias1 = self.f(self.eps_bias1)
-        else:
-            self.eps_W2.copy_(self.eps_q.ger(self.eps_p))
-            self.eps_bias2 = self.f(self.eps_bias2)
+        self.eps_p.copy_(self.f(self.eps_p))
+        self.eps_q.copy_(self.f(self.eps_q))
 
     def forward(self, x):
         if self.training:
-            if self._cnt:
-                weight = self.mu_W + self.sigma_W * self.eps_W1
-                bias = self.mu_bias + self.sigma_bias * self.eps_bias1
-            else:
-                weight = self.mu_W + self.sigma_W * self.eps_W2
-                bias = self.mu_bias + self.sigma_bias * self.eps_bias2
-            self._cnt ^= 1
+            weight = self.mu_W + self.sigma_W * self.eps_q.ger(self.eps_p)
+            bias = self.mu_bias + self.sigma_bias * self.eps_q.clone()
         else:
             weight = self.mu_W
             bias = self.mu_bias

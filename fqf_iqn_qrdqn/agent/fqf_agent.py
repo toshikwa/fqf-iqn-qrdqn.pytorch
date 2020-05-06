@@ -86,10 +86,6 @@ class FQFAgent(BaseAgent):
             weights = torch.ones(
                 (self.batch_size, ), dtype=torch.float).to(self.device)
 
-        # Reset the noises.
-        self.online_net.reset_noise()
-        self.target_net.reset_noise()
-
         # Calculate embeddings of current states.
         state_embeddings = self.online_net.calculate_state_embeddings(states)
 
@@ -204,9 +200,9 @@ class FQFAgent(BaseAgent):
 
             # Calculate Q values of next states.
             if self.double_q_learning:
-                # Reset the noise of online network to decorrelate between
+                # Sample the noise of online network to decorrelate between
                 # the action selection and the quantile calculation.
-                self.online_net.reset_noise()
+                self.online_net.sample_noise()
                 next_q = self.online_net.calculate_q(states=next_states)
             else:
                 next_state_embeddings =\

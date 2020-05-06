@@ -1,9 +1,10 @@
 from torch import nn
 
+from .base_model import BaseModel
 from fqf_iqn_qrdqn.network import DQNBase, NoisyLinear
 
 
-class QRDQN(nn.Module):
+class QRDQN(BaseModel):
 
     def __init__(self, num_channels, num_actions, N=200, embedding_dim=7*7*64,
                  dueling_net=False, noisy_net=False):
@@ -74,9 +75,3 @@ class QRDQN(nn.Module):
         assert q.shape == (batch_size, self.num_actions)
 
         return q
-
-    def reset_noise(self):
-        if self.noisy_net:
-            for m in self.modules():
-                if isinstance(m, NoisyLinear):
-                    m.sample()

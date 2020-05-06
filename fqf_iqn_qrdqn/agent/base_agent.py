@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 import os
 import numpy as np
 import torch
@@ -8,7 +9,7 @@ from fqf_iqn_qrdqn.memory import LazyMultiStepMemory, \
 from fqf_iqn_qrdqn.utils import RunningMeanStats, LinearAnneaer
 
 
-class BaseAgent:
+class BaseAgent(ABC):
 
     def __init__(self, env, test_env, log_dir, num_steps=5*(10**7),
                  batch_size=32, memory_size=10**6, gamma=0.99, multi_step=1,
@@ -119,8 +120,9 @@ class BaseAgent:
             action = self.online_net.calculate_q(states=state).argmax().item()
         return action
 
+    @abstractmethod
     def learn(self):
-        raise NotImplementedError
+        pass
 
     def save_models(self, save_dir):
         if not os.path.exists(save_dir):
@@ -150,9 +152,6 @@ class BaseAgent:
         state = self.env.reset()
 
         while (not done) and episode_steps <= self.max_episode_steps:
-            # Reset the noise.
-            self.online_net.reset_noise()
-
             if self.is_random(eval=False):
                 action = self.explore()
             else:
@@ -190,6 +189,8 @@ class BaseAgent:
 
         if self.is_update():
             self.learn()
+            self.online_net.sample_noise()
+            self.target_net.sample_noise()
 
         if self.steps % self.eval_interval == 0:
             self.evaluate()

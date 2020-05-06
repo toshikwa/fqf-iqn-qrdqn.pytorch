@@ -100,9 +100,9 @@ class QRDQNAgent(BaseAgent):
         with torch.no_grad():
             # Calculate Q values of next states.
             if self.double_q_learning:
-                # Reset the noise of online network to decorrelate between
+                # Sample the noise of online network to decorrelate between
                 # the action selection and the quantile calculation.
-                self.online_net.reset_noise()
+                self.online_net.sample_noise()
                 next_q = self.online_net.calculate_q(states=next_states)
             else:
                 next_q = self.target_net.calculate_q(states=next_states)
@@ -115,8 +115,7 @@ class QRDQNAgent(BaseAgent):
             next_sa_quantiles = evaluate_quantile_at_action(
                 self.target_net(states=next_states),
                 next_actions).transpose(1, 2)
-            assert next_sa_quantiles.shape == (
-                self.batch_size, 1, self.N)
+            assert next_sa_quantiles.shape == (self.batch_size, 1, self.N)
 
             # Calculate target quantile values.
             target_sa_quantiles = rewards[..., None] + (

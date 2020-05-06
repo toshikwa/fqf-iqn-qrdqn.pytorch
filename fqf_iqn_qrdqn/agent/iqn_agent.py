@@ -56,10 +56,6 @@ class IQNAgent(BaseAgent):
     def learn(self):
         self.learning_steps += 1
 
-        # Reset the noises.
-        self.online_net.reset_noise()
-        self.target_net.reset_noise()
-
         if self.use_per:
             (states, actions, rewards, next_states, dones), weights =\
                 self.memory.sample(self.batch_size)
@@ -91,7 +87,6 @@ class IQNAgent(BaseAgent):
 
     def calculate_loss(self, state_embeddings, actions, rewards, next_states,
                        dones, weights):
-
         # Sample fractions.
         taus = torch.rand(
             self.batch_size, self.N, dtype=state_embeddings.dtype,
@@ -108,9 +103,9 @@ class IQNAgent(BaseAgent):
         with torch.no_grad():
             # Calculate Q values of next states.
             if self.double_q_learning:
-                # Reset the noise of online network to decorrelate between
+                # Sample the noise of online network to decorrelate between
                 # the action selection and the quantile calculation.
-                self.online_net.reset_noise()
+                self.online_net.sample_noise()
                 next_q = self.online_net.calculate_q(states=next_states)
             else:
                 next_state_embeddings =\
