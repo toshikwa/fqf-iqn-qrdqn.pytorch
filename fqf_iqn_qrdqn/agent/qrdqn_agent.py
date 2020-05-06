@@ -57,10 +57,8 @@ class QRDQNAgent(BaseAgent):
 
     def learn(self):
         self.learning_steps += 1
-
-        # Reset the noises.
-        self.online_net.reset_noise()
-        self.target_net.reset_noise()
+        self.online_net.sample_noise()
+        self.target_net.sample_noise()
 
         if self.use_per:
             (states, actions, rewards, next_states, dones), weights =\

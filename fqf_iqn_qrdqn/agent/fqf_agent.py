@@ -76,6 +76,8 @@ class FQFAgent(BaseAgent):
 
     def learn(self):
         self.learning_steps += 1
+        self.online_net.sample_noise()
+        self.target_net.sample_noise()
 
         if self.use_per:
             (states, actions, rewards, next_states, dones), weights =\
