@@ -83,15 +83,10 @@ class BaseAgent:
         self.grad_cliping = grad_cliping
 
     def run(self):
-        import time
         while True:
-            now = time.time()
             self.train_episode()
             if self.steps > self.num_steps:
                 break
-            _now = time.time()
-            print(_now - now)
-            now = _now
 
     def is_update(self):
         return self.steps % self.update_interval == 0\
