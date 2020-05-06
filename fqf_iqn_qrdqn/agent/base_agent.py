@@ -37,15 +37,11 @@ class BaseAgent(ABC):
         self.target_net = None
 
         # Replay memory which is memory-efficient to store stacked frames.
-        self.use_per = use_per
-        if use_per:
-            self.memory = LazyPrioritizedMultiStepMemory(
-                memory_size, self.env.observation_space.shape,
-                self.device, gamma, multi_step)
-        else:
-            self.memory = LazyMultiStepMemory(
-                memory_size, self.env.observation_space.shape,
-                self.device, gamma, multi_step)
+        Memory = LazyPrioritizedMultiStepMemory if use_per \
+            else LazyMultiStepMemory
+        self.memory = Memory(
+            memory_size, self.env.observation_space.shape,
+            self.device, gamma, multi_step)
 
         self.log_dir = log_dir
         self.model_dir = os.path.join(log_dir, 'model')
@@ -69,6 +65,7 @@ class BaseAgent(ABC):
         self.double_q_learning = double_q_learning
         self.dueling_net = dueling_net
         self.noisy_net = noisy_net
+        self.use_per = use_per
 
         self.log_interval = log_interval
         self.eval_interval = eval_interval
@@ -190,7 +187,6 @@ class BaseAgent(ABC):
         if self.is_update():
             self.learn()
             self.online_net.sample_noise()
-            self.target_net.sample_noise()
 
         if self.steps % self.eval_interval == 0:
             self.evaluate()

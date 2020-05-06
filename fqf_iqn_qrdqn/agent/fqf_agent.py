@@ -85,8 +85,7 @@ class FQFAgent(BaseAgent):
         else:
             states, actions, rewards, next_states, dones =\
                 self.memory.sample(self.batch_size)
-            weights = torch.ones(
-                (self.batch_size, ), dtype=torch.float).to(self.device)
+            weights = None
 
         # Calculate embeddings of current states.
         state_embeddings = self.online_net.calculate_state_embeddings(states)
@@ -185,9 +184,13 @@ class FQFAgent(BaseAgent):
 
         # Gradients of the network parameters and corresponding loss
         # are calculated using chain rule.
-        fraction_loss = ((
-            (gradient_of_taus * taus[:, 1:-1]).sum(dim=1, keepdim=True)
-        ) * weights).mean()
+        if weights is not None:
+            fraction_loss = ((
+                (gradient_of_taus * taus[:, 1:-1]).sum(dim=1, keepdim=True)
+            ) * weights).mean()
+        else:
+            fraction_loss = \
+                (gradient_of_taus * taus[:, 1:-1]).sum(dim=1).mean()
 
         return fraction_loss
 

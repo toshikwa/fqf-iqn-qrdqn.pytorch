@@ -27,7 +27,7 @@ def calculate_huber_loss(td_errors, kappa=1.0):
         kappa * (td_errors.abs() - 0.5 * kappa))
 
 
-def calculate_quantile_huber_loss(td_errors, taus, weights, kappa=1.0):
+def calculate_quantile_huber_loss(td_errors, taus, weights=None, kappa=1.0):
     assert not taus.requires_grad
     batch_size, N, N_dash = td_errors.shape
 
@@ -49,7 +49,10 @@ def calculate_quantile_huber_loss(td_errors, taus, weights, kappa=1.0):
     assert errors.shape == (batch_size, 1)
 
     # Quantile huber loss.
-    quantile_huber_loss = (errors * weights).mean()
+    if weights is not None:
+        quantile_huber_loss = (errors * weights).mean()
+    else:
+        quantile_huber_loss = errors.mean()
 
     return quantile_huber_loss, errors.detach()
 

@@ -64,8 +64,7 @@ class IQNAgent(BaseAgent):
         else:
             states, actions, rewards, next_states, dones =\
                 self.memory.sample(self.batch_size)
-            weights = torch.ones(
-                (self.batch_size, ), dtype=torch.float).to(self.device)
+            weights = None
 
         # Calculate features of states.
         state_embeddings = self.online_net.calculate_state_embeddings(states)

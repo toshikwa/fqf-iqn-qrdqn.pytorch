@@ -66,8 +66,7 @@ class QRDQNAgent(BaseAgent):
         else:
             states, actions, rewards, next_states, dones =\
                 self.memory.sample(self.batch_size)
-            weights = torch.ones(
-                (self.batch_size, ), dtype=torch.float).to(self.device)
+            weights = None
 
         quantile_loss, mean_q, errors = self.calculate_loss(
             states, actions, rewards, next_states, dones, weights)
