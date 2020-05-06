@@ -199,11 +199,15 @@ class NoisyLinear(nn.Module):
 
         # Non-parameters.
         self.register_buffer(
-            'eps_W', torch.FloatTensor(out_features, in_features))
-        self.register_buffer('eps_bias', torch.FloatTensor(out_features))
+            'eps_W1', torch.FloatTensor(out_features, in_features))
+        self.register_buffer('eps_bias1', torch.FloatTensor(out_features))
+        self.register_buffer(
+            'eps_W2', torch.FloatTensor(out_features, in_features))
+        self.register_buffer('eps_bias2', torch.FloatTensor(out_features))
         self.register_buffer('eps_p', torch.FloatTensor(in_features))
         self.register_buffer('eps_q', torch.FloatTensor(out_features))
 
+        self._cnt = 0
         self.in_features = in_features
         self.out_features = out_features
         self.sigma = sigma
@@ -223,14 +227,22 @@ class NoisyLinear(nn.Module):
     def sample(self):
         self.eps_p = self.f(self.eps_p)
         self.eps_q = self.f(self.eps_q)
-        self.eps_W.copy_(self.eps_q.ger(self.eps_p))
-        self.eps_bias = self.f(self.eps_bias)
+        if self._cnt:
+            self.eps_W1.copy_(self.eps_q.ger(self.eps_p))
+            self.eps_bias1 = self.f(self.eps_bias1)
+        else:
+            self.eps_W2.copy_(self.eps_q.ger(self.eps_p))
+            self.eps_bias2 = self.f(self.eps_bias2)
 
     def forward(self, x):
         if self.training:
-            eps_W, eps_bias = copy(self.eps_W), copy(self.eps_bias)
-            weight = self.mu_W + self.sigma_W * eps_W
-            bias = self.mu_bias + self.sigma_bias * eps_bias
+            if self._cnt:
+                weight = self.mu_W + self.sigma_W * self.eps_W1
+                bias = self.mu_bias + self.sigma_bias * self.eps_bias1
+            else:
+                weight = self.mu_W + self.sigma_W * self.eps_W2
+                bias = self.mu_bias + self.sigma_bias * self.eps_bias2
+            self._cnt ^= 1
         else:
             weight = self.mu_W
             bias = self.mu_bias
