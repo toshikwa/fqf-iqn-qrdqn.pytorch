@@ -37,11 +37,15 @@ class BaseAgent(ABC):
         self.target_net = None
 
         # Replay memory which is memory-efficient to store stacked frames.
-        Memory = LazyPrioritizedMultiStepMemory if use_per \
-            else LazyMultiStepMemory
-        self.memory = Memory(
-            memory_size, self.env.observation_space.shape,
-            self.device, gamma, multi_step)
+        if use_per:
+            beta_steps = (num_steps - start_steps) / update_interval
+            self.memory = LazyPrioritizedMultiStepMemory(
+                memory_size, self.env.observation_space.shape,
+                self.device, gamma, multi_step, beta_steps=beta_steps)
+        else:
+            self.memory = LazyMultiStepMemory(
+                memory_size, self.env.observation_space.shape,
+                self.device, gamma, multi_step)
 
         self.log_dir = log_dir
         self.model_dir = os.path.join(log_dir, 'model')

@@ -43,18 +43,17 @@ def calculate_quantile_huber_loss(td_errors, taus, weights=None, kappa=1.0):
     assert element_wise_quantile_huber_loss.shape == (
         batch_size, N, N_dash)
 
-    # Errors to update priorities.
-    errors = element_wise_quantile_huber_loss.sum(
-        dim=1).mean(dim=1, keepdim=True)
-    assert errors.shape == (batch_size, 1)
-
     # Quantile huber loss.
-    if weights is not None:
-        quantile_huber_loss = (errors * weights).mean()
-    else:
-        quantile_huber_loss = errors.mean()
+    batch_quantile_huber_loss = element_wise_quantile_huber_loss.sum(
+        dim=1).mean(dim=1, keepdim=True)
+    assert batch_quantile_huber_loss.shape == (batch_size, 1)
 
-    return quantile_huber_loss, errors.detach()
+    if weights is not None:
+        quantile_huber_loss = (batch_quantile_huber_loss * weights).mean()
+    else:
+        quantile_huber_loss = batch_quantile_huber_loss.mean()
+
+    return quantile_huber_loss
 
 
 def evaluate_quantile_at_action(s_quantiles, actions):
