@@ -8,13 +8,17 @@ from .segment_tree import SumTree, MinTree
 class LazyPrioritizedMultiStepMemory(LazyMultiStepMemory):
 
     def __init__(self, capacity, state_shape, device, gamma=0.99,
-                 multi_step=3, alpha=0.5, beta=0.4, beta_steps=2e5):
+                 multi_step=3, alpha=0.5, beta=0.4, beta_steps=2e5,
+                 min_pa=0.0, max_pa=1.0, eps=0.01):
         super().__init__(capacity, state_shape, device, gamma, multi_step)
 
         self.alpha = alpha
         self.beta = beta
         self.beta_diff = (1.0 - beta) / beta_steps
-        self.epsilon = 0.01
+        self.min_pa = min_pa
+        self.max_pa = max_pa
+        self.eps = eps
+        self._cached = None
 
         it_capacity = 1
         while it_capacity < capacity:
@@ -22,15 +26,15 @@ class LazyPrioritizedMultiStepMemory(LazyMultiStepMemory):
         self.it_sum = SumTree(it_capacity)
         self.it_min = MinTree(it_capacity)
 
-        self._cached = None
-        self.max_pa = 1.0
+    def _pa(self, p):
+        return np.clip((p + self.eps) ** self.alpha, self.min_pa, self.max_pa)
 
     def append(self, state, action, reward, next_state, done, p=None):
         # Calculate priority.
         if p is None:
             pa = self.max_pa
         else:
-            pa = p ** self.alpha
+            pa = self._pa(p)
 
         if self.multi_step != 1:
             self.buff.append(state, action, reward)
@@ -53,15 +57,10 @@ class LazyPrioritizedMultiStepMemory(LazyMultiStepMemory):
         super()._append(state, action, reward, next_state, done)
 
     def _sample_idxes(self, batch_size):
-        indices = np.empty((batch_size, ), dtype=np.int64)
         total_pa = self.it_sum.sum(0, self._n)
-
-        for i in range(batch_size):
-            mass = np.random.rand() * total_pa * (i + 1) / batch_size
-            indices[i] = self.it_sum.find_prefixsum_idx(mass)
-
-        # Anneal beta.
-        self.beta = min(1. - self.epsilon, self.beta + self.beta_diff)
+        rands = np.random.rand(batch_size) * total_pa
+        indices = [self.it_sum.find_prefixsum_idx(r) for r in rands]
+        self.beta = min(1., self.beta + self.beta_diff)
         return indices
 
     def sample(self, batch_size):
@@ -73,26 +72,20 @@ class LazyPrioritizedMultiStepMemory(LazyMultiStepMemory):
         return batch, weights
 
     def _calc_weights(self, indices):
-        weights = torch.empty((len(indices), 1), dtype=torch.float)
-        pi_min = self.it_min.min() / self.it_sum.sum()
-        max_weight = (pi_min * self._n) ** (-self.beta)
-
-        for i, index in enumerate(indices):
-            pi = self.it_sum[index] / self.it_sum.sum()
-            weights[i] = (pi * self._n) ** (-self.beta) / max_weight
-
-        return weights.to(self.device)
+        min_pa = self.it_min.min()
+        weights = [(self.it_sum[i] / min_pa) ** -self.beta for i in indices]
+        return torch.FloatTensor(weights).to(self.device).view(-1, 1)
 
     def update_priority(self, errors):
         assert self._cached is not None
 
-        errors = errors.detach().cpu().numpy().flatten()
-        pas = errors ** self.alpha
+        ps = errors.detach().cpu().abs().numpy().flatten()
+        pas = self._pa(ps)
 
         for index, pa in zip(self._cached, pas):
             assert 0 <= index < self._n
+            assert 0 < pa
             self.it_sum[index] = pa
             self.it_min[index] = pa
-            self.max_pa = max(self.max_pa, pa)
 
         self._cached = None
