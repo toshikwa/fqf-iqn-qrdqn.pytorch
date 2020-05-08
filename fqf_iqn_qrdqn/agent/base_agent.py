@@ -149,6 +149,11 @@ class BaseAgent(ABC):
         state = self.env.reset()
 
         while (not done) and episode_steps <= self.max_episode_steps:
+            # NOTE: Noises can be sampled only after self.learn(). However, I
+            # sample noises before every action, which seems to lead better
+            # performances.
+            self.online_net.sample_noise()
+
             if self.is_random(eval=False):
                 action = self.explore()
             else:
@@ -186,7 +191,6 @@ class BaseAgent(ABC):
 
         if self.is_update():
             self.learn()
-            self.online_net.sample_noise()
 
         if self.steps % self.eval_interval == 0:
             self.evaluate()

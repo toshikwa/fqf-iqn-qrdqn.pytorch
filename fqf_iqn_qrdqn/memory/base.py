@@ -4,45 +4,43 @@ import torch
 
 
 class MultiStepBuff:
-    keys = ["state", "action", "reward"]
 
     def __init__(self, maxlen=3):
         super(MultiStepBuff, self).__init__()
         self.maxlen = int(maxlen)
-        self.memory = {
-            key: deque(maxlen=self.maxlen)
-            for key in self.keys
-            }
+        self.reset()
 
     def append(self, state, action, reward):
-        self.memory["state"].append(state)
-        self.memory["action"].append(action)
-        self.memory["reward"].append(reward)
+        self.states.append(state)
+        self.actions.append(action)
+        self.rewards.append(reward)
 
     def get(self, gamma=0.99):
-        assert len(self) == self.maxlen
-        reward = self._multi_step_reward(gamma)
-        state = self.memory["state"].popleft()
-        action = self.memory["action"].popleft()
-        _ = self.memory["reward"].popleft()
+        assert len(self.rewards) > 0
+        state = self.states.popleft()
+        action = self.actions.popleft()
+        reward = self._nstep_return(gamma)
         return state, action, reward
 
-    def _multi_step_reward(self, gamma):
-        return np.sum([
-            r * (gamma ** i) for i, r
-            in enumerate(self.memory["reward"])])
-
-    def __getitem__(self, key):
-        if key not in self.keys:
-            raise Exception(f'There is no key {key} in MultiStepBuff.')
-        return self.memory[key]
+    def _nstep_return(self, gamma):
+        r = np.sum([r * (gamma ** i) for i, r in enumerate(self.rewards)])
+        self.rewards.popleft()
+        return r
 
     def reset(self):
-        for key in self.keys:
-            self.memory[key].clear()
+        # Buffer to store n-step transitions.
+        self.states = deque(maxlen=self.maxlen)
+        self.actions = deque(maxlen=self.maxlen)
+        self.rewards = deque(maxlen=self.maxlen)
+
+    def is_empty(self):
+        return len(self.rewards) == 0
+
+    def is_full(self):
+        return len(self.rewards) == self.maxlen
 
     def __len__(self):
-        return len(self.memory['state'])
+        return len(self.rewards)
 
 
 class LazyMemory(dict):
@@ -158,11 +156,13 @@ class LazyMultiStepMemory(LazyMemory):
         if self.multi_step != 1:
             self.buff.append(state, action, reward)
 
-            if len(self.buff) == self.multi_step:
+            if self.buff.is_full():
                 state, action, reward = self.buff.get(self.gamma)
                 self._append(state, action, reward, next_state, done)
 
             if done:
-                self.buff.reset()
+                while not self.buff.is_empty():
+                    state, action, reward = self.buff.get(self.gamma)
+                    self._append(state, action, reward, next_state, done)
         else:
             self._append(state, action, reward, next_state, done)
