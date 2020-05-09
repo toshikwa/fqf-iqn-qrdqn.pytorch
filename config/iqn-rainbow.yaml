@@ -1,0 +1,26 @@
+num_steps: 50000000  # It equals to 200M frames.
+batch_size: 32
+N: 64
+N_dash: 64
+K: 32
+num_cosines: 64
+kappa: 1.0
+lr: 5.e-5
+memory_size: 1000000
+gamma: 0.99
+multi_step: 3
+update_interval: 4
+target_update_interval: 10000
+start_steps: 50000
+epsilon_train: 0.01
+epsilon_eval: 0.001
+epsilon_decay_steps: 250000  # It equals to 1M frames.
+double_q_learning: True
+dueling_net: True
+noisy_net: True
+use_per: True
+log_interval: 100
+eval_interval: 250000
+num_eval_steps: 125000  # It equals to 500k frames.
+max_episode_steps: 27000
+grad_cliping:
