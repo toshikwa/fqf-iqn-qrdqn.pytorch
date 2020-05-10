@@ -43,10 +43,6 @@ class IQNAgent(BaseAgent):
         # Disable calculations of gradients of the target network.
         disable_gradients(self.target_net)
 
-        if use_per:
-            # If use PER, reduce learning rate by a factor 4.
-            lr /= 4.0
-
         self.optim = Adam(
             self.online_net.parameters(),
             lr=lr, eps=1e-2/batch_size)
