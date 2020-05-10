@@ -17,9 +17,10 @@ def run(args):
         args.env_id, episode_life=False, clip_rewards=False)
 
     # Specify the directory to log.
+    name = args.config.split('/')[-1].rstrip('.yaml')
     time = datetime.now().strftime("%Y%m%d-%H%M")
     log_dir = os.path.join(
-        'logs', args.env_id, f'QRDQN-{args.seed}-{time}')
+        'logs', args.env_id, f'{name}-seed{args.seed}-{time}')
 
     # Create the agent and run.
     agent = QRDQNAgent(

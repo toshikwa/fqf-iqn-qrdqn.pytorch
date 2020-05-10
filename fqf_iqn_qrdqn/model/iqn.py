@@ -1,11 +1,11 @@
 import torch
-from torch import nn
 
+from .base_model import BaseModel
 from fqf_iqn_qrdqn.network import DQNBase, CosineEmbeddingNetwork,\
-    QuantileNetwork, NoisyLinear
+    QuantileNetwork
 
 
-class IQN(nn.Module):
+class IQN(BaseModel):
 
     def __init__(self, num_channels, num_actions, K=32, num_cosines=32,
                  embedding_dim=7*7*64, dueling_net=False, noisy_net=False):
@@ -65,9 +65,3 @@ class IQN(nn.Module):
         assert q.shape == (batch_size, self.num_actions)
 
         return q
-
-    def reset_noise(self):
-        if self.noisy_net:
-            for m in self.modules():
-                if isinstance(m, NoisyLinear):
-                    m.reset_noise()

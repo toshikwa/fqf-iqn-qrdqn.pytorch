@@ -2,6 +2,12 @@
 
 This is a PyTorch implementation of Fully parameterized Quantile Function(FQF)[[1]](#references), Implicit Quantile Networks(IQN)[[2]](#references) and Quantile Regression DQN(QR-DQN)[[3]](#references). I tried to make it easy for readers to understand algorithms. Please let me know if you have any questions. Also, any pull requests are welcomed.
 
+**UPDATE**
+- 2020.5.10
+    - Refactor codes.
+    - Fix Prioritized Experience Replay and Noisy Networks.
+    - Test IQN with Rainbow's components.
+
 ## Installation
 You can install dependencies using `pip install -r requirements.txt`.
 
@@ -29,6 +35,12 @@ I tested FQF, IQN and QR-DQN on `BreakoutNoFrameskip-v4` for 30M frames to see a
 I also tested FQF and IQN on `BerzerkNoFrameskip-v4` for 100M frames to see the difference between FQF's performance and IQN's, which is quite obvious on this task.
 
 <img src="https://user-images.githubusercontent.com/37267851/75846243-0ccd4e00-5e1f-11ea-9c03-b93e7b505dc8.png" width=700>
+
+### IQN-Rainbow
+I also tested IQN with Rainbow's components on `PongNoFrameskip-v4` (just 1 seed). Note that I decreased `num_steps` to 7500000(30M frames), but kept `start_steps` as the same.
+
+<img src="https://user-images.githubusercontent.com/37267851/81501233-340a3500-9312-11ea-8384-4b9c0b660583.png" width=700>
+
 
 ## TODO
 
