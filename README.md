@@ -7,9 +7,23 @@ This is a PyTorch implementation of Fully parameterized Quantile Function(FQF)[[
     - Refactor codes.
     - Fix Prioritized Experience Replay and Noisy Networks.
     - Test IQN with Rainbow's components.
+- 2020.6.9
+    - Bump Torch up to 1.5.0.
 
-## Installation
-You can install dependencies using `pip install -r requirements.txt`.
+## Setup
+If you are using Anaconda, first create the virtual environment.
+
+```bash
+conda create -n fqf python=3.8 -y
+conda activate fqf
+```
+
+You can install Python liblaries using pip.
+
+```bash
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
 ## Examples
 You can train FQF agent using hyperparameters [here](https://github.com/ku2482/fqf-iqn-qrdqn.pytorch/blob/master/config/fqf.yaml).
