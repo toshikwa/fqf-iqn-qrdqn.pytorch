@@ -93,7 +93,7 @@ class FQFAgent(BaseAgent):
         # Calculate fractions of current states and entropies.
         taus, tau_hats, entropies =\
             self.online_net.calculate_fractions(
-                state_embeddings=state_embeddings)
+                state_embeddings=state_embeddings.detach())
 
         # Calculate quantile values of current states and actions at tau_hats.
         current_sa_quantile_hats = evaluate_quantile_at_action(
@@ -121,7 +121,7 @@ class FQFAgent(BaseAgent):
             networks=[self.online_net.fraction_net], retain_graph=True,
             grad_cliping=self.grad_cliping)
         update_params(
-            self.quantile_optim, quantile_loss + entropy_loss,
+            self.quantile_optim, quantile_loss,
             networks=[
                 self.online_net.dqn_net, self.online_net.cosine_net,
                 self.online_net.quantile_net],
