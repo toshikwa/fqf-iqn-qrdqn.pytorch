@@ -4,7 +4,7 @@ This is a PyTorch implementation of Fully parameterized Quantile Function(FQF)[[
 
 **UPDATE**
 - 2020.6.9
-    - Bump Torch up to 1.5.0.
+    - Bump torch up to 1.5.0.
 - 2020.5.10
     - Refactor codes.
     - Fix Prioritized Experience Replay and Noisy Networks.
