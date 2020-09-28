@@ -2,8 +2,8 @@ import torch
 from torch.optim import Adam, RMSprop
 
 from fqf_iqn_qrdqn.model import FQF
-from fqf_iqn_qrdqn.utils import disable_gradients, update_params,\
-    calculate_quantile_huber_loss, evaluate_quantile_at_action
+from fqf_iqn_qrdqn.utils import calculate_quantile_huber_loss, disable_gradients, evaluate_quantile_at_action, update_params
+
 from .base_agent import BaseAgent
 
 
@@ -113,6 +113,7 @@ class FQFAgent(BaseAgent):
         quantile_loss, mean_q, errors = self.calculate_quantile_loss(
             state_embeddings, tau_hats, current_sa_quantile_hats, actions,
             rewards, next_states, dones, weights)
+        assert errors.shape == (self.batch_size, 1)
 
         entropy_loss = -self.ent_coef * entropies.mean()
 
@@ -246,4 +247,4 @@ class FQFAgent(BaseAgent):
             td_errors, tau_hats, weights, self.kappa)
 
         return quantile_huber_loss, next_q.detach().mean().item(), \
-            td_errors.detach().abs()
+            td_errors.detach().abs().sum(dim=1).mean(dim=1, keepdim=True)

@@ -2,8 +2,8 @@ import torch
 from torch.optim import Adam
 
 from fqf_iqn_qrdqn.model import QRDQN
-from fqf_iqn_qrdqn.utils import disable_gradients, update_params,\
-    calculate_quantile_huber_loss, evaluate_quantile_at_action
+from fqf_iqn_qrdqn.utils import calculate_quantile_huber_loss, disable_gradients, evaluate_quantile_at_action, update_params
+
 from .base_agent import BaseAgent
 
 
@@ -70,6 +70,7 @@ class QRDQNAgent(BaseAgent):
 
         quantile_loss, mean_q, errors = self.calculate_loss(
             states, actions, rewards, next_states, dones, weights)
+        assert errors.shape == (self.batch_size, 1)
 
         update_params(
             self.optim, quantile_loss,
@@ -126,4 +127,4 @@ class QRDQNAgent(BaseAgent):
             td_errors, self.tau_hats, weights, self.kappa)
 
         return quantile_huber_loss, next_q.detach().mean().item(), \
-            td_errors.detach().abs()
+            td_errors.detach().abs().sum(dim=1).mean(dim=1, keepdim=True)
