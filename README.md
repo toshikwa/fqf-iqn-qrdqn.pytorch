@@ -41,7 +41,7 @@ You can also train IQN or QR-DQN agent in the same way. Note that we log results
 ## Results
 Results of examples (without n-step rewards, double q-learning, dueling network nor noisy net) are shown below, which is comparable (if no better) with the paper. Scores below are evaluated arfer every 1M frames (250k agent's steps). Result are averaged over 2 seeds and visualized with min/max.
 
-Note that I only trained a limited number of frames due to limited resources (e.g. 100M frames instead of 200M).
+**Note that I reported the "mean" score, not the "best" score as in the paper.** Also, I only trained a limited number of frames due to limited resources (e.g. 100M frames instead of 200M).
 
 ### BreakoutNoFrameskip-v4
 I tested FQF, IQN and QR-DQN on `BreakoutNoFrameskip-v4` for 30M frames to see algorithms worked.
